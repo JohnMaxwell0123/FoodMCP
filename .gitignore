@@ -1,0 +1,42 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data
+data/
+*.srt
+*.json.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests & Scratch
+.pytest_cache/
+scratch/
+*.backup.html
+
+# Portfolio draft variants (keep official deliverables only)
+FoodMCP_v*.pdf
+FoodMCP_个人作品集_v*.pdf
+
+# Logs
+*.log
+logs/
