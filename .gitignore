@@ -14,7 +14,10 @@ build/
 *.egg
 
 # Data
-data/
+data/*
+!data/eval/
+data/eval/*
+!data/eval/golden_dataset.json
 *.srt
 *.json.tmp
 

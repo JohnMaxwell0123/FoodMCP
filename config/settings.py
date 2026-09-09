@@ -32,11 +32,11 @@ class BilibiliSettings(BaseSettings):
 
 
 class LLMSettings(BaseSettings):
-    """LLM 配置 (Chat 模型)"""
+    """LLM 配置 (Chat 模型，推荐 DeepSeek)"""
 
     openai_api_key: str = ""
-    openai_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o"
+    openai_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-chat"  # deepseek-chat 自动映射至官方最新版本(如 V3/V4/V4.1)，亦可指定具体版本
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -47,6 +47,7 @@ class EmbeddingSettings(BaseSettings):
     api_key: str = ""
     base_url: str = "https://api.openai.com/v1"
     model: str = "text-embedding-3-small"
+    dimension: int = 1536  # 对应向量维度 (如 text-embedding-3-small=1536, bge-m3=1024, large=3072)
 
     model_config = SettingsConfigDict(env_prefix="EMBEDDING_", extra="ignore")
 
@@ -98,7 +99,7 @@ class AmapSettings(BaseSettings):
 class WhisperSettings(BaseSettings):
     """Whisper ASR 配置"""
 
-    model: str = "large-v3"
+    model: str = "large-v3-turbo"  # 推荐 large-v3-turbo (推理速度提升4x且显存低)，亦可选 large-v3 / medium / small
     device: str = "cuda"
 
     model_config = SettingsConfigDict(env_prefix="WHISPER_", extra="ignore")

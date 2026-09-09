@@ -10,9 +10,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================
@@ -67,6 +67,7 @@ class Restaurant(BaseModel):
     tags: list[str] = Field(default_factory=list, description="标签")
     latitude: float | None = Field(default=None, description="纬度")
     longitude: float | None = Field(default=None, description="经度")
+    geo_verified: bool = Field(default=False, description="地理编码是否经过高置信度核验")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -201,11 +202,71 @@ class TranscriptResult(BaseModel):
         return " ".join(seg.text for seg in self.segments)
 
 
+class TaskStatus(str, Enum):
+    """Pipeline 任务状态机"""
+
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    SUBTITLE_EXTRACTED = "SUBTITLE_EXTRACTED"
+    EXTRACTED = "EXTRACTED"
+    STORED = "STORED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+
+
 class PipelineTask(BaseModel):
-    """Pipeline 处理任务"""
+    """Pipeline 处理任务状态模型"""
 
     video: VideoInfo
+    bvid: str = Field(default="", description="视频BV号")
+    up_mid: int = Field(default=0, description="UP主MID")
+    title: str = Field(default="", description="视频标题")
+    status: TaskStatus = Field(default=TaskStatus.PENDING, description="任务状态")
+    stage: str = Field(default="init", description="生命周期阶段(init/subtitle/llm/storage)")
+    retry_count: int = Field(default=0, description="重试次数")
+    error_message: str = Field(default="", description="错误信息")
+    transcript_source: str = Field(default="", description="字幕来源(cc/ai/whisper)")
+    restaurant_count: int = Field(default=0, description="识别餐厅数")
+    dish_count: int = Field(default=0, description="识别菜品数")
+    updated_at: datetime | None = Field(default=None, description="更新时间")
     transcript: TranscriptResult | None = None
     extraction: ExtractionResult | None = None
-    status: str = Field(default="pending", description="pending/processing/done/error")
-    error_message: str = Field(default="")
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.bvid and self.video:
+            self.bvid = self.video.bvid
+        if not self.up_mid and self.video:
+            try:
+                self.up_mid = int(self.video.up_mid)
+            except (ValueError, TypeError):
+                self.up_mid = 0
+        if not self.title and self.video:
+            self.title = self.video.title
+        if self.updated_at is None:
+            self.updated_at = datetime.now()
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Any) -> TaskStatus:
+        if isinstance(v, TaskStatus):
+            return v
+        if isinstance(v, str):
+            mapping = {
+                "pending": TaskStatus.PENDING,
+                "processing": TaskStatus.PROCESSING,
+                "done": TaskStatus.STORED,
+                "stored": TaskStatus.STORED,
+                "error": TaskStatus.FAILED,
+                "failed": TaskStatus.FAILED,
+                "skipped": TaskStatus.SKIPPED,
+                "extracted": TaskStatus.EXTRACTED,
+                "subtitle_extracted": TaskStatus.SUBTITLE_EXTRACTED,
+            }
+            v_lower = v.lower()
+            if v_lower in mapping:
+                return mapping[v_lower]
+            try:
+                return TaskStatus(v.upper())
+            except ValueError:
+                return TaskStatus.PENDING
+        return TaskStatus.PENDING

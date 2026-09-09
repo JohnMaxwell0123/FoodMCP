@@ -25,7 +25,7 @@ from src.collector.video_filter import VideoFilter
 from src.extractor.llm_client import LLMClient
 from src.models.entities import (
     Dish, ExtractionResult, PipelineTask, Restaurant,
-    Review, Sentiment, UPMaster, VideoInfo, AspectReview,
+    Review, Sentiment, TaskStatus, UPMaster, VideoInfo, AspectReview,
 )
 from src.storage.pg_store import PostgresStore
 from src.storage.neo4j_store import Neo4jStore
@@ -68,6 +68,8 @@ class PipelineRunner:
         city: str = "",
         limit: int = 20,
         skip_store: bool = False,
+        resume: bool = True,
+        max_retries: int = 3,
     ) -> list[PipelineTask]:
         """
         运行完整 Pipeline
@@ -77,13 +79,17 @@ class PipelineRunner:
             city: 目标城市（用于数据标注）
             limit: 最大处理视频数
             skip_store: 是否跳过数据库存储（调试用）
+            resume: 是否启用断点续传（跳过已成功落盘的视频）
+            max_retries: 单视频最大重试次数（指数退避）
 
         Returns:
             处理任务列表
         """
         settings.ensure_data_dirs()
 
-        logger.info(f"=== Pipeline 启动: UP主={up_mid}, 城市={city}, 限制={limit} ===")
+        logger.info(
+            f"=== Pipeline 启动: UP主={up_mid}, 城市={city}, 限制={limit}, 续传={resume} ==="
+        )
 
         # Step 1: 获取视频列表
         logger.info("Step 1: 获取视频列表...")
@@ -100,54 +106,117 @@ class PipelineRunner:
             logger.warning("未找到探店视频，Pipeline 结束")
             return []
 
-        # Step 3 & 4: 逐个处理视频
+        # 获取历史已完成任务（断点续传快速判断）
+        completed_bvids: set[str] = set()
+        if resume and not skip_store:
+            try:
+                completed_bvids = await self.pg.get_completed_bvids(up_mid=up_mid)
+                if completed_bvids:
+                    logger.info(f"[RESUME] 发现 {len(completed_bvids)} 个历史已完成视频，将自动跳过")
+            except Exception as e:
+                logger.warning(f"[RESUME] 获取历史已完成视频列表失败，将正常处理: {e}")
+
+        # Step 3 & 4 & 5: 逐个处理视频
         tasks: list[PipelineTask] = []
         for i, video in enumerate(food_videos):
-            logger.info(f"--- 处理视频 [{i+1}/{len(food_videos)}]: {video.title} ---")
-            task = PipelineTask(video=video)
+            logger.info(f"--- 处理视频 [{i+1}/{len(food_videos)}]: {video.title} ({video.bvid}) ---")
 
-            try:
-                # Step 3: 提取字幕
-                task.status = "processing"
-                transcript = await self.subtitle_extractor.extract(video.bvid)
-                task.transcript = transcript
-
-                if not transcript.full_text and not transcript.segments:
-                    logger.warning(f"视频 {video.bvid} 无可用字幕，跳过")
-                    task.status = "error"
-                    task.error_message = "无可用字幕"
-                    tasks.append(task)
-                    continue
-
-                # Step 4: LLM 信息抽取
-                text = transcript.to_full_text()
-                extraction = await self.llm.extract_from_transcript(
-                    up_name=video.up_name,
-                    video_title=video.title,
-                    transcript_text=text,
+            # 1. 检查断点续传跳过
+            if resume and video.bvid in completed_bvids:
+                logger.info(f"[RESUME] 视频 {video.bvid} 历史已落盘 (STORED)，断点续传跳过")
+                skipped_task = PipelineTask(
+                    video=video,
+                    status=TaskStatus.SKIPPED,
+                    stage="resumed",
                 )
-                task.extraction = extraction
+                tasks.append(skipped_task)
+                continue
 
-                # Step 5: 存储
-                if not skip_store and extraction.restaurants:
-                    await self._store_extraction(
-                        video=video, extraction=extraction, city=city,
+            task = PipelineTask(video=video, status=TaskStatus.PROCESSING, stage="init")
+            if not skip_store:
+                try:
+                    await self.pg.upsert_pipeline_task(task)
+                except Exception as e:
+                    logger.warning(f"更新任务初始状态失败: {e}")
+
+            # 2. 带有重试与指数退避的处理循环
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # Step 3: 提取字幕
+                    task.stage = "subtitle"
+                    transcript = await self.subtitle_extractor.extract(video.bvid)
+                    task.transcript = transcript
+                    task.transcript_source = transcript.source or ""
+
+                    if not transcript.full_text and not transcript.segments:
+                        logger.warning(f"视频 {video.bvid} 无可用字幕，跳过")
+                        task.status = TaskStatus.FAILED
+                        task.stage = "subtitle"
+                        task.error_message = "无可用字幕"
+                        if not skip_store:
+                            await self.pg.upsert_pipeline_task(task)
+                        break
+
+                    task.status = TaskStatus.SUBTITLE_EXTRACTED
+                    if not skip_store:
+                        await self.pg.upsert_pipeline_task(task)
+
+                    # Step 4: LLM 信息抽取
+                    task.stage = "llm"
+                    text = transcript.to_full_text()
+                    extraction = await self.llm.extract_from_transcript(
+                        up_name=video.up_name,
+                        video_title=video.title,
+                        transcript_text=text,
                     )
+                    task.extraction = extraction
+                    task.status = TaskStatus.EXTRACTED
+                    if not skip_store:
+                        await self.pg.upsert_pipeline_task(task)
 
-                task.status = "done"
+                    # Step 5: 存储
+                    if not skip_store:
+                        task.stage = "storage"
+                        if extraction.restaurants:
+                            await self._store_extraction(
+                                video=video, extraction=extraction, city=city,
+                            )
+                            task.restaurant_count = len(extraction.restaurants)
+                            task.dish_count = sum(len(r.dishes) for r in extraction.restaurants)
+                        task.status = TaskStatus.STORED
+                        task.stage = "completed"
+                        await self.pg.upsert_pipeline_task(task)
+                    else:
+                        task.status = TaskStatus.STORED
+                        task.stage = "completed"
 
-            except Exception as e:
-                logger.error(f"处理视频 {video.bvid} 失败: {e}")
-                task.status = "error"
-                task.error_message = str(e)
+                    break
+
+                except Exception as e:
+                    task.retry_count = attempt
+                    task.error_message = str(e)
+                    logger.error(f"处理视频 {video.bvid} 失败 (尝试 {attempt}/{max_retries}): {e}")
+
+                    if attempt < max_retries:
+                        backoff = 2.0 ** attempt
+                        logger.info(f"等待 {backoff:.1f}s 后进行指数退避重试...")
+                        await asyncio.sleep(backoff)
+                    else:
+                        task.status = TaskStatus.FAILED
+                        if not skip_store:
+                            try:
+                                await self.pg.upsert_pipeline_task(task)
+                            except Exception as store_err:
+                                logger.warning(f"写入失败任务记录异常: {store_err}")
 
             tasks.append(task)
-            # 礼貌性延迟
+            # 礼貌性延迟防止触发 B 站 412
             await asyncio.sleep(2.0)
 
         # 汇总统计
-        done = sum(1 for t in tasks if t.status == "done")
-        errors = sum(1 for t in tasks if t.status == "error")
+        stored_count = sum(1 for t in tasks if t.status == TaskStatus.STORED)
+        skipped_count = sum(1 for t in tasks if t.status == TaskStatus.SKIPPED)
+        failed_count = sum(1 for t in tasks if t.status == TaskStatus.FAILED)
         total_restaurants = sum(
             len(t.extraction.restaurants) for t in tasks
             if t.extraction and t.extraction.restaurants
@@ -159,8 +228,11 @@ class PipelineRunner:
 
         logger.info(
             f"=== Pipeline 完成 ===\n"
-            f"  处理: {done}/{len(tasks)} 成功, {errors} 失败\n"
-            f"  提取: {total_restaurants} 个餐厅, {total_dishes} 道菜品"
+            f"  总任务数: {len(tasks)}\n"
+            f"  落盘成功: {stored_count}\n"
+            f"  断点跳过: {skipped_count}\n"
+            f"  处理失败: {failed_count}\n"
+            f"  累计提取: {total_restaurants} 个餐厅, {total_dishes} 道菜品"
         )
 
         # 保存报告
@@ -208,11 +280,13 @@ class PipelineRunner:
                     district=geo.district,
                     latitude=geo.latitude,
                     longitude=geo.longitude,
+                    geo_verified=geo.is_verified,
                 )
                 restaurant.address = geo.address
                 restaurant.city = geo.city
                 restaurant.latitude = geo.latitude
                 restaurant.longitude = geo.longitude
+                restaurant.geo_verified = geo.is_verified
 
             await self.neo4j.merge_restaurant(restaurant)
 
@@ -225,7 +299,8 @@ class PipelineRunner:
                     price=float(ext_dish.price) if ext_dish.price.replace(".", "").isdigit() else None,
                     avg_sentiment=sentiment_map.get(ext_dish.verdict, 0.0),
                 )
-                await self.pg.upsert_dish(dish)
+                persisted_dish_id = await self.pg.upsert_dish(dish)
+                dish.id = persisted_dish_id  # 统一使用已持久化的唯一 ID
                 await self.neo4j.merge_dish(dish, restaurant.id)
 
                 # 存储评价
@@ -294,11 +369,16 @@ class PipelineRunner:
 
         report = []
         for task in tasks:
+            status_str = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
             entry = {
-                "bvid": task.video.bvid,
-                "title": task.video.title,
-                "status": task.status,
+                "bvid": task.bvid or (task.video.bvid if task.video else ""),
+                "title": task.title or (task.video.title if task.video else ""),
+                "status": status_str,
+                "stage": task.stage,
+                "retry_count": task.retry_count,
                 "error": task.error_message,
+                "restaurant_count": task.restaurant_count,
+                "dish_count": task.dish_count,
             }
             if task.extraction:
                 entry["restaurants"] = [

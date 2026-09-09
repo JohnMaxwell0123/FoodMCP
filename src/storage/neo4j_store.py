@@ -53,7 +53,8 @@ class Neo4jStore:
             MERGE (r:Restaurant {id: $id})
             SET r.name=$name, r.city=$city, r.district=$district,
                 r.address=$address, r.cuisine_type=$cuisine_type,
-                r.price_range=$price_range, r.tags=$tags
+                r.price_range=$price_range, r.tags=$tags,
+                r.geo_verified=$geo_verified
             WITH r
             MERGE (c:City {name: $city})
             MERGE (r)-[:位于]->(c)
@@ -62,7 +63,8 @@ class Neo4jStore:
             await session.run(query, id=restaurant.id, name=restaurant.name,
                 city=restaurant.city, district=restaurant.district,
                 address=restaurant.address, cuisine_type=restaurant.cuisine_type,
-                price_range=restaurant.price_range, tags=restaurant.tags)
+                price_range=restaurant.price_range, tags=restaurant.tags,
+                geo_verified=restaurant.geo_verified)
 
     async def merge_dish(self, dish: Dish, restaurant_id: str) -> None:
         query = """
@@ -138,3 +140,20 @@ class Neo4jStore:
             if rec.get("up_name"):
                 dishes[dn]["reviews"].append({"up": rec["up_name"], "verdict": rec["verdict"], "quote": rec["quote"]})
         return {"restaurant": records[0]["rest"] if records else "", "dishes": list(dishes.values())}
+
+    async def get_up_master_graph(self, up_master_id: str) -> dict:
+        """从图数据库获取 UP主的探店关系与菜品评价图谱"""
+        query = """
+            MATCH (u:UPMaster {id: $uid})-[rev:评价]->(d:Dish)<-[:提供]-(r:Restaurant)
+            RETURN u.name AS up_name, r.name AS restaurant, r.city AS city,
+                   r.cuisine_type AS cuisine, d.name AS dish,
+                   rev.sentiment AS verdict, rev.raw_text AS quote
+            ORDER BY r.name, d.name
+        """
+        async with self._driver.session() as session:
+            result = await session.run(query, uid=up_master_id)
+            records = await result.data()
+        return {
+            "up_name": records[0]["up_name"] if records else "",
+            "evaluations": records,
+        }

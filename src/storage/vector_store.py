@@ -20,8 +20,13 @@ EMBEDDING_DIM = 1536  # text-embedding-3-small 维度
 class VectorStore:
     """Milvus 向量数据库管理"""
 
-    def __init__(self, collection_name: str | None = None) -> None:
+    def __init__(
+        self,
+        collection_name: str | None = None,
+        dimension: int | None = None,
+    ) -> None:
         self.collection_name = collection_name or settings.milvus.collection
+        self.dimension = dimension or settings.embedding.dimension
         self._collection: Collection | None = None
 
     def connect(self) -> None:
@@ -47,7 +52,7 @@ class VectorStore:
             FieldSchema(name="city", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="sentiment", dtype=DataType.VARCHAR, max_length=20),
             FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=2000),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self.dimension),
         ]
         schema = CollectionSchema(fields, description="美食评价向量")
         self._collection = Collection(self.collection_name, schema)

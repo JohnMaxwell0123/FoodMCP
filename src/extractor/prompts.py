@@ -7,6 +7,8 @@ Prompt 模板管理
 
 from __future__ import annotations
 
+from loguru import logger
+
 EXTRACTION_SYSTEM_PROMPT = """\
 你是一个专业的美食视频分析师。请仔细阅读以下B站探店视频的字幕文本，\
 从中提取结构化的餐厅和菜品评价信息。
@@ -129,7 +131,7 @@ class PromptBuilder:
         up_name: str,
         video_title: str,
         transcript_text: str,
-        max_text_length: int = 8000,
+        max_text_length: int = 32000,
     ) -> tuple[str, str]:
         """
         构建信息提取的 System + User Prompt
@@ -138,13 +140,16 @@ class PromptBuilder:
             up_name: UP主名称
             video_title: 视频标题
             transcript_text: 字幕文本
-            max_text_length: 字幕文本最大长度（防止超出上下文窗口）
+            max_text_length: 字幕文本最大长度（默认32000字符，充分利用长上下文模型）
 
         Returns:
             (system_prompt, user_prompt) 元组
         """
         # 截断过长文本
         if len(transcript_text) > max_text_length:
+            logger.warning(
+                f"视频 《{video_title}》 字幕长度 {len(transcript_text)} 超过上限 {max_text_length}，已执行截断保护"
+            )
             transcript_text = transcript_text[:max_text_length] + "\n\n[...文本已截断...]"
 
         user_prompt = EXTRACTION_USER_PROMPT_TEMPLATE.format(
@@ -178,6 +183,8 @@ class PromptBuilder:
             f"请为 **{city}** 规划 {days} 天的美食行程。\n\n"
             f"用户偏好：{preferences or '无特殊偏好'}\n"
             f"预算档次：{budget}\n\n"
+            f"地理路线规划原则：\n"
+            f"- 请充分参考餐厅数据中的行政区划与高德经纬度坐标，严格遵循就近聚类原则（如将同区或相邻街区的餐厅编排进同一天/半天），杜绝跨城折返。\n\n"
             f"以下是可选的餐厅和菜品评价数据：\n\n{restaurant_data}"
         )
 

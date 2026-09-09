@@ -9,6 +9,87 @@
 
 ## 🏗️ 已完成的工作
 
+### 2026-09-09 — MCP 核心工具体系进阶扩展 (MCP Tool Suite Expansion)
+
+**完成内容：** 将 MCP Tool 扩充至 5 大工业级工具，实现跨店横向好评避雷对比、UP 主口味画像与排雷苛刻度分析、高德坐标感知的聚类行程规划，全套单元测试扩充至 **37/37 全部通过**。
+- [x] **餐厅横向多维对比工具 (`compare_restaurants`)**：
+  - 支持传入两家餐厅与目标城市进行多维深度 PK；
+  - 聚合 UP 主探访列表、推荐/一般/踩雷分布、计算**好评率与避雷率**；
+  - 自动提炼两家餐厅各自的招牌推荐菜（红榜）与踩雷菜品（黑榜），并给出高好评率优先与低避雷率安全选择建议。
+- [x] **UP 主探店与口味画像工具 (`get_up_taste_profile`)**：
+  - 联表查询 UP 主历史探店餐厅、评价记录与 Neo4j 评价图谱；
+  - 统计探店城市足迹与常探**菜系偏好分布及占比**；
+  - 依据其历史踩雷率量化评估其**排雷严苛度等级**（如“极高（毒舌/真实/排雷专家）”、“温和”等）；
+  - 输出该 UP 主最具共识的盛赞必吃菜与公开踩雷菜品名录（附 UP 主原话语录）。
+- [x] **行程规划工具地理感知升级 (`generate_food_tour_itinerary`)**：
+  - 整合高德 POI 经纬度坐标（`latitude`, `longitude`）、行政区划及 `geo_verified` 核验标识；
+  - 升级 Prompt 路线聚类指引：严格遵循就近聚类原则（同区或相邻街区餐厅编排进同一时段），彻底杜绝跨城两端折返跑。
+- [x] **生产级启动容错与强校验 (`startup`)**：
+  - 引入 `MCP_STRICT_STORAGE` 环境变量支持：默认环境优雅降级运行，生产严苛模式下若存储连接失败则抛出 `RuntimeError` 快速失败。
+- [x] **单元测试与 CI 覆盖**：
+  - 新增 `tests/test_mcp.py`（6 个测试），全面覆盖 5 大工具注册、餐厅 PK 逻辑、UP 主画像计算、高德经纬度注入与分发；
+  - 全套单元测试从 31/31 扩充至 **37/37 全部通过**。
+
+### 2026-09-09 — 生产级增量调度器与断点续传系统建设 (Pipeline Task State Machine & Resumption)
+
+**完成内容：** 建立基于 PostgreSQL 的视频级 Pipeline 任务状态机，实现历史落盘视频秒级断点跳过、全生命周期阶段追踪、API 限流指数退避重试与 CLI 状态监控看板，全套单元测试扩充至 **31/31 全部通过**。
+- [x] **任务生命周期状态机模型升级 (`src/models/entities.py`)**：
+  - 新增 `TaskStatus(str, Enum)`：涵盖 `PENDING`, `PROCESSING`, `SUBTITLE_EXTRACTED`, `EXTRACTED`, `STORED`, `SKIPPED`, `FAILED` 状态；
+  - 增强 `PipelineTask` 模型：支持由 `VideoInfo` 自动推导 `bvid`, `up_mid`, `title`，自动注入 `updated_at`，并实现字符串状态自动规范化校验器。
+- [x] **存储层任务状态机持久化 (`src/storage/pg_store.py`)**：
+  - `INIT_SQL` 与增量迁移增加 `pipeline_tasks` 表，记录阶段、重试次数、字幕来源、实体统计与错误信息；
+  - 实现 `upsert_pipeline_task`（基于 `bvid` 冲突更新）、`get_pipeline_task` 与 `list_pipeline_tasks`；
+  - 实现 `get_completed_bvids`：$O(1)$ 批量获取已完成视频，支撑极速断点续传过滤。
+- [x] **调度器断点续传与弹性重试流转 (`src/pipeline/runner.py`)**：
+  - 默认开启 `resume=True`，在批量处理前加载 `completed_bvids` 并将已存储视频标记为 `SKIPPED`，杜绝重复抽取与 Token 浪费；
+  - 细粒度持久化 `init` -> `subtitle` -> `llm` -> `storage` -> `completed` 阶段流转；
+  - 针对瞬时网络抖动和 API RateLimit（B 站 412 / LLM 429）实现指数退避重试保护（1s -> 2s -> 4s）；
+  - `_save_report` 扩充输出状态机字段与实体计数。
+- [x] **CLI 命令与状态监控面板升级 (`scripts/run_pipeline.py`)**：
+  - 增加 `--resume / --no-resume`、`--max-retries` 选项；
+  - 增加 `--status` 开关：直接查询并打印指定 UP 主的历史任务分布表格面板；
+  - 终端运行摘要区分 `[STORED]`, `[SKIPPED]`, `[FAILED]` 徽标。
+- [x] **单元测试全量通过**：
+  - 新增 `tests/test_pipeline_state.py`（6 个用例），测试模型自动推导、状态规范化、SQL 构造、断点跳过与异常捕获；
+  - 全套单元测试从 25/25 扩充至 **31/31 全部通过**。
+
+### 2026-09-09 — 工业级 LLM 抽取 Eval 评测体系与黄金测试集建设
+
+**完成内容：** 建立标准化 LLM 抽取 Eval 评测框架与黄金基准数据集，提供自动化 NER F1、情感混淆矩阵、原文引用保真度（Faithfulness）与幻觉率打分，全套单元测试扩充至 25/25 全部通过。
+- [x] **黄金基准数据集沉淀**：
+  - 打造 `data/eval/golden_dataset.json`，涵盖单店深度探店、多店扫街、暗讽踩雷反转、地域菜系细分等 8 类高难度探店切片样本；
+  - 精标标准餐厅、菜品、正负面 Verdict 倾向与原文字幕引用片段。
+- [x] **四维核心评测引擎实现 (`src/eval/evaluator.py`)**：
+  - **实体识别指标 (NER)**：基于 RapidFuzz 模糊匹配计算餐厅与菜品的 Precision、Recall 和 F1-Score；
+  - **情感三分类指标**：计算整体准确率 Accuracy、3x3 混淆矩阵以及 Macro-F1；专门建立**“踩雷误报为推荐率 (False Recommendation Rate)”**高危缺陷监控；
+  - **保真度与抗幻觉率 (Faithfulness)**：基于字符连续性与模糊滑动检测 UP 主原话是否存在于原文字幕中，精准捕获 LLM 凭空捏造原话的幻觉；
+  - **Schema 完备率**：统计 JSON 一次性合规解析率。
+- [x] **评测 CLI 工具与自动报告生成 (`scripts/run_eval.py`)**：
+  - 支持调用真实大模型（如 `deepseek-chat`）评测，支持 `--mock` 离线快速验证；
+  - 基于 Rich 打造专业终端图表面板（综合指标表 + 混淆矩阵表）；
+  - 自动输出 Markdown (`.md`) 与 JSON (`.json`) 格式的评测基准报告，适配 CI/CD 与开源 Showcase。
+- [x] **单元测试与 CI 覆盖**：
+  - 新增 `tests/test_eval.py`（5 个用例），测试完美匹配、漏检误检、情感错判、幻觉捕获与报告导出；
+  - 全套单元测试从 20/20 扩充至 **25/25 全部通过**。
+
+### 2026-09-09 — 基础筑基与数据治理（高德置信度门禁 + 实体去重聚合）
+
+**完成内容：** 解决高德 POI 误匹配脏数据污染、实体菜品/餐厅去重断裂导致图谱共识失效、长文本字幕硬截断问题，全套单元测试扩充至 20/20 全部通过。
+- [x] **高德 POI 置信度校验与优雅降级**：
+  - 引入 `RapidFuzz` 计算文本相似度（Token Set Ratio / Partial Ratio / Ratio）；
+  - 引入城市强约束校验（跨城施加 $-0.50$ 重罚，同城加成）与餐饮分类加成；
+  - 建立三级置信度门禁：$\ge 0.70$ 高置信度采纳，$< 0.45$ 坚决拒纳错误 POI 并降级为城市中心坐标，彻底根除“山居满陇”匹配为农家院问题；
+  - 实体模型与 PG 表结构扩充 `geo_verified` 标识。
+- [x] **实体去重与知识图谱拓扑聚合**：
+  - `dishes` 表新增联合唯一键约束 `CONSTRAINT uq_dishes_restaurant_name UNIQUE (restaurant_id, name)`；
+  - 重写 `upsert_dish`：通过 `ON CONFLICT (restaurant_id, name) DO UPDATE` 平滑累加并平滑计算多 UP 主的情感分，`RETURNING id` 确保返回持久化唯一 ID；
+  - 重构 `find_restaurant_by_name`：实现“同城精确 → 全局精确 → 同城模糊 → 全局模糊”的多级消歧匹配；
+  - 修复 `runner.py`：统一使用持久化 ID 连接评价与 Neo4j 图节点，图谱真正具备多 UP 主共识能力。
+- [x] **长文本处理能力扩充**：Prompt 字幕截断保护上限从 8,000 字符提升至 32,000 字符，释放长视频上下文。
+- [x] **依赖与测试规范化**：
+  - `pyproject.toml` 补齐 `psycopg[binary]>=3.1.0` 与 `rapidfuzz>=3.0.0`；
+  - 新增 `tests/test_amap.py` 与 `tests/test_storage_dedup.py`，全套测试从 11/11 扩充至 **20/20 全部通过**。
+
 ### 2026-09-09 — GitHub 开源发布与规范化就绪
 
 **完成内容：** 完成项目开源安全审计、配置规范化、旗舰级 README 打造并成功上线 GitHub。
@@ -200,35 +281,38 @@ foodrecomandation/
 - [x] **完整 Pipeline 含数据库存储** — *已完成：2/2 视频成功写入 PG + Neo4j + Milvus*
 - [x] ~~修复 Windows 兼容性：pg_store 从 asyncpg 迁移到 psycopg3~~ — *已完成（05-18）*
 - [x] **集成高德地理编码** — *已完成（05-18），餐厅自动补全地址/经纬度*
-- [ ] **修复高德 POI 误匹配**：增加匹配置信度校验（名称相似度 + 城市/商圈约束），误配时降级为"仅城市级"坐标
+- [x] **修复高德 POI 误匹配** — *已完成（09-09），RapidFuzz 相似度核验 + 城市强约束 + 三级门禁与降级*
 
 ### 🟡 中优先级
 - [ ] 选定 3-5 个目标UP主进行试采集
 - [x] 端到端 Pipeline 调试（先用 `--skip-store` 模式） — *已完成*
+- [x] 构建 Ground Truth 黄金测试集与 LLM 自动化 Eval 评测脚本 — *已完成（09-09）*
 - [ ] LLM 提取 Prompt 调优（基于实际字幕数据）
-- [ ] 数据质量评估（准确率目标 ≥ 85%）
+- [x] 实现 Pipeline 任务持久化与断点续传机制 (--resume) — *已完成（09-09）*
 
 ### 🟢 低优先级（Phase 2）
 - [ ] 编写集成测试
 - [x] 添加 Docker Compose 配置文件
 - [ ] 实现 Airflow/Celery 定时任务
-- [ ] 扩展 MCP Tool（compare_restaurants, trending_restaurants 等）
-- [ ] 性能优化（批量处理、并发控制）
+- [x] 扩展 MCP Tool（compare_restaurants, get_up_taste_profile 等） — *已完成（09-09）*
+- [ ] 补齐 B 站视频音频流下载器与 Whisper 转写闭环
 
 ---
 
 ## 🔧 技术债务 & 已知问题
 - ~~**已解决**：B站 412 风控 — 安装 `curl-cffi` 后自动使用 `CurlCFFIClient` 绕过 TLS 指纹检测~~
 - ~~**已解决**：`subtitle_extractor.py` 的 `_get_subtitle_list` 缺少 cid 参数导致字幕提取失败~~
-- ~~**已解决**：asyncpg 在 Windows 下连接 PostgreSQL 失败 — 已迁移到 psycopg3~~
+- ~~**已解决**：asyncpg 在 Windows 下连接 PostgreSQL 失败 — 已迁移到 psycopg3 并补充 pyproject.toml 声明~~
 - ~~**已解决**：本地 Windows PostgreSQL 与 Docker PostgreSQL 端口 5432 冲突 — 改用 5433~~
-- **新发现（05-18）**：高德 POI 匹配可能误配（例："山居满陇" → "北京绿岗山居农家院"），错误坐标会污染地理数据，需加置信度校验
+- ~~**已解决**：高德 POI 匹配误配（"山居满陇" → 农家院）— 已引入 RapidFuzz 相似度门禁 + 城市强约束校验 + 城市中心优雅降级~~
+- ~~**已解决**：菜品与餐厅去重断裂 — `dishes` 表建立 `(restaurant_id, name)` 联合唯一索引与评分聚合，`runner.py` 全链路统一使用持久化 ID~~
+- ~~**已解决**：长视频字幕 8000 字符硬截断 — 已提升至 32000 字符保护上限~~
+- ~~**已解决**：`vector_store.py` 的 EMBEDDING_DIM 硬编码为 1536 — 已在 settings.embedding.dimension 中动态读取配置~~
+- ~~**已解决**：Pipeline 缺少断点续传机制 — 已实现 pipeline_tasks 状态持久化、--resume 断点跳过与指数退避重试~~
+- ~~**已解决**：MCP Server 的 startup 中数据库连接失败只是 warning — 已引入 MCP_STRICT_STORAGE 强校验环境变量开关~~
 - **注意**：高频请求（连续多个 UP 主无间隔）仍可能触发 412，需保持 ≥2s 请求间隔
 - **注意**：部分 UP 主视频列表可能返回空（隐私设置或 API 限制），需要在 Pipeline 中做容错处理
 - `neo4j_store.py` 中的 MERGE 关系查询在大数据量下可能需要优化索引
-- `vector_store.py` 的 EMBEDDING_DIM 硬编码为 1536，如切换 embedding 模型需调整
-- Pipeline 缺少断点续传机制（中断后需重新处理）
-- MCP Server 的 startup 中数据库连接失败只是 warning，生产环境应改为 fatal
 
 ---
 
@@ -241,3 +325,5 @@ foodrecomandation/
 6. **双API架构**: DeepSeek (`deepseek-chat`) 做 LLM 抽取 + OpenAI (`text-embedding-3-small`) 做 Embedding，成本与效果平衡
 7. **地理编码**: 高德 POI 搜索补全餐厅地址/经纬度（餐厅名+城市 → 标准化坐标），为行程规划 Tool 提供地理数据
 8. **PG 驱动**: asyncpg → psycopg3（Windows 兼容性），连接端口 5433 避开本地 PG 冲突
+9. **任务状态机与断点续传**: PostgreSQL `pipeline_tasks` 表记录阶段与重试，默认 `--resume` 秒级跳过已落盘视频，并在网络抖动/限流时启用指数退避重试保护。
+10. **MCP 核心工具体系**: 扩充至 5 大工业级 Tool，支持跨店横向评价对比、UP 主口味偏好与排雷严苛度画像、以及基于高德真实 POI 坐标就近聚类规划的美食路线。
