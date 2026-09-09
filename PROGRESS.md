@@ -2,31 +2,30 @@
 
 > **项目名称：** B站探店视频深度解析与 Agent MCP 服务
 > **最后更新：** 2026-09-09
-> **当前阶段：** Phase 1 — MVP 概念验证（已完成）→ GitHub 开源与秋招展示就绪
+> **当前阶段：** Phase 1 — MVP 概念验证（已完成）→ GitHub 开源发布
 > **整体进度：** ██████████ 100%（全链路打通，三库存储 + 地理编码，已推送到 GitHub 开源）
 
 ---
 
 ## 🏗️ 已完成的工作
 
-### 2026-09-09 — GitHub 开源发布与秋招展示准备完成
+### 2026-09-09 — GitHub 开源发布与规范化就绪
 
 **完成内容：** 完成项目开源安全审计、配置规范化、旗舰级 README 打造并成功上线 GitHub。
 - [x] **开源安全审计**：更新 `.gitignore`，隔离 `.env`、`data/`、`scratch/`、临时大文件与日志，零泄露真实凭据
 - [x] **配置模版对齐**：同步 `.env.example`，补充 DeepSeek + OpenAI 双 API、高德地图 Key 与 PostgreSQL 5433 端口配置
-- [x] **开源许可**：创建正式 MIT `LICENSE`（Copyright 2026 Yuxuan Jia）
-- [x] **秋招旗舰级 README**：全新打造涵盖痛点四象限、竞品对比、系统全景 Mermaid 架构图、5 大核心攻坚亮点、MCP 配置与作品集导航的顶级门面
+- [x] **开源许可**：创建正式 MIT `LICENSE`（Copyright 2026 John Maxwell）
+- [x] **开源旗舰级 README**：全新打造涵盖痛点四象限、竞品对比、系统全景 Mermaid 架构图、5 大核心攻坚亮点、MCP 配置与设计文档导航的顶级门面
 - [x] **自动化测试验证**：`py311` 环境下 11/11 单元测试全部通过
 - [x] **GitHub 仓库建立与推送**：成功创建并推送到官方仓库 [JohnMaxwell0123/FoodMCP](https://github.com/JohnMaxwell0123/FoodMCP)
 
-### 2026-07-22 — 作品集交付物整理
+### 2026-07-22 — 产品设计与架构材料整理
 
-**完成内容：** 面向字节跳动 AI 产品经理岗位，完成全套作品集材料。
-- [x] `PORTFOLIO.md` — 个人作品集（产品思维 + 架构设计 + 商业模式 + 能力映射）
-- [x] `SUMMARY.md` — 一页纸项目概要
+**完成内容：** 完成全套产品设计白皮书、一页纸架构概要与交互式演示材料。
+- [x] `PORTFOLIO.md` — 产品设计白皮书（产品思维 + 架构设计 + 商业模式）
+- [x] `SUMMARY.md` — 一页纸项目架构概要
 - [x] `presentation.html` — 交互式产品演示页
-- [x] `portfolio_pdf.html` — PDF 打印版作品集源文件
-- [x] 输出两份 PDF：`FoodMCP_个人作品集.pdf`、`贾宇轩-AI产品作品集Claude.pdf`
+- [x] `portfolio_pdf.html` — 打印版设计白皮书源文件
 
 ### 2026-05-18 — 完整 Pipeline 验证（含三库存储 + 高德地理编码）
 
@@ -180,10 +179,10 @@ foodrecomandation/
 ├── .gitignore
 ├── README.md
 ├── proposal.md                    # 项目计划书
-├── PORTFOLIO.md                   # 个人作品集
+├── PORTFOLIO.md                   # 产品设计白皮书
 ├── SUMMARY.md                     # 一页纸项目概要
 ├── presentation.html              # 交互式演示页
-└── portfolio_pdf.html             # PDF 打印版作品集
+└── portfolio_pdf.html             # 打印版设计白皮书
 ```
 
 ---

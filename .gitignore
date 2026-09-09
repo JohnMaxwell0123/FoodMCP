@@ -33,9 +33,8 @@ Thumbs.db
 scratch/
 *.backup.html
 
-# Portfolio draft variants (keep official deliverables only)
-FoodMCP_v*.pdf
-FoodMCP_个人作品集_v*.pdf
+# Binary documents & PDFs
+*.pdf
 
 # Logs
 *.log

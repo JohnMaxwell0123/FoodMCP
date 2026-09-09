@@ -14,7 +14,7 @@
 [![Milvus](https://img.shields.io/badge/Vector-Milvus_2.4-00A4E4?style=flat)](https://milvus.io/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
-[中文文档](#-一产品概述) · [系统架构](#-三系统架构设计) · [技术难点攻坚](#-四核心技术难点与工程攻坚) · [极速上手](#-六快速开始) · [Claude/Cursor配置](#-七-claude-desktop--cursor-接入指南) · [作品集 (PORTFOLIO)](PORTFOLIO.md)
+[中文文档](#-一产品概述) · [系统架构](#-三系统架构设计) · [技术难点攻坚](#-四核心技术难点与工程攻坚) · [极速上手](#-六快速开始) · [Claude/Cursor配置](#-七-claude-desktop--cursor-接入指南) · [产品白皮书 (PORTFOLIO)](PORTFOLIO.md)
 
 </div>
 
@@ -269,22 +269,22 @@ foodrecomandation/
 ├── tests/                   # 核心模块自动化单元测试
 ├── docker-compose.yml       # 一键三库编排文件
 ├── pyproject.toml           # 现代 Python 依赖管理
-├── PORTFOLIO.md             # 📖 个人作品集：产品思维 + 商业分析 + 能力映射
-├── SUMMARY.md               # 📄 一页纸项目 Executive Summary
+├── PORTFOLIO.md             # 📖 产品设计白皮书：产品思维 + 商业分析 + 场景闭环
+├── SUMMARY.md               # 📄 项目 Executive Summary
 ├── presentation.html        # 💻 交互式产品演示页面
 └── PROGRESS.md              # 🛠️ 研发全流程演进记录
 ```
 
 ---
 
-## 👤 作者与求职作品集
+## 👥 维护与设计文档
 
-本项目由 **[贾宇轩 (Yuxuan Jia)](https://github.com/JohnMaxwell0123)** 独立构思、设计与落地：
-- 🌟 **核心求职方向**：AI 产品经理 (AI PM) / AI 应用开发工程师
-- 📚 **产品思维与商业分析**：详见 **[个人作品集完整版 (PORTFOLIO.md)](PORTFOLIO.md)**
-- 📄 **快速一览**：详见 **[一页纸项目概要 (SUMMARY.md)](SUMMARY.md)**
+本项目由 **[John Maxwell (@JohnMaxwell0123)](https://github.com/JohnMaxwell0123)** 独立构思、设计与落地：
+- 📚 **产品设计与商业模式**：详见 **[产品设计白皮书 (PORTFOLIO.md)](PORTFOLIO.md)**
+- 📄 **架构与设计概要**：详见 **[一页纸项目概要 (SUMMARY.md)](SUMMARY.md)**
+- 💻 **交互式展示**：详见 **[Web 端产品演示 (presentation.html)](presentation.html)**
 
-欢迎探讨交流或提出 Issue / PR！
+欢迎在 GitHub 提交 Issue 或 PR 参与交流！
 
 ---
 
