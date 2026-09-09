@@ -64,7 +64,7 @@
 ## 🏗️ 三、系统架构设计
 
 <div align="center">
-  <img src="assets/architecture_blueprint.png" alt="FoodMCP Technical Architecture Blueprint" width="100%">
+  <img src="assets/architecture_blueprint.jpeg" alt="FoodMCP Technical Architecture Blueprint" width="100%">
 </div>
 
 系统整体采用 **分层解耦 + 异构混合存储 + 标准化协议暴露** 的架构体系：
