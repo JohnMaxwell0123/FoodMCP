@@ -49,7 +49,31 @@ class TestEntityAndDeduplication:
         # 检查 SQL 中是否包含 ON CONFLICT (restaurant_id, name)
         executed_sql = mock_cursor.execute.call_args[0][0]
         assert "ON CONFLICT (restaurant_id, name)" in executed_sql
-        assert "ROUND(((dishes.avg_sentiment + EXCLUDED.avg_sentiment) / 2.0)::numeric, 2)" in executed_sql
+        # 冲突时不再两两平均（结果依赖写入顺序），由 refresh_dish_sentiment 统一重算
+        assert "avg_sentiment =" not in executed_sql
+
+    @pytest.mark.asyncio
+    async def test_refresh_dish_sentiment_uses_mean_of_all_reviews(self):
+        """测试菜品情感分按全部评价求平均，返回最新值"""
+        store = PostgresStore()
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchone = AsyncMock(return_value=[0.27])
+
+        mock_conn = MagicMock()
+        mock_cursor_ctx = MagicMock()
+        mock_cursor_ctx.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_conn.cursor = MagicMock(return_value=mock_cursor_ctx)
+
+        store._conn = mock_conn
+
+        score = await store.refresh_dish_sentiment("dish-uuid-001")
+        assert score == 0.27
+
+        executed_sql, params = mock_cursor.execute.call_args[0]
+        assert "AVG(sentiment_score)" in executed_sql
+        assert "FROM reviews WHERE dish_id = %s" in executed_sql
+        assert params == ("dish-uuid-001", "dish-uuid-001")
 
     @pytest.mark.asyncio
     async def test_find_restaurant_precision_priority(self):

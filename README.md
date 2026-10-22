@@ -156,7 +156,7 @@ flowchart TD
 | **入库餐厅** | 2 家（8.4 优雅河鲜、山居满陇） |
 | **提取精细化菜品** | 11 道（包含口感、色泽、锅气、刀工等多维度细节与原话） |
 | **三库存储写入率** | 100%（PG 实体、Neo4j 节点边、Milvus 向量全部一致写入） |
-| **核心单元测试** | 37 / 37 全部通过 |
+| **核心单元测试** | 39 / 39 全部通过 |
 
 ---
 
@@ -236,16 +236,17 @@ python -m scripts.run_pipeline --up-mid 1462401621 --city 北京 --limit 5
 {
   "mcpServers": {
     "food-mcp": {
-      "command": "d:\\Document\\Project\\foodrecomandation\\.venv\\Scripts\\python.exe",
+      "command": "/path/to/FoodMCP/.venv/bin/python",
       "args": [
         "-m",
         "src.mcp_server.server"
       ],
-      "cwd": "d:\\Document\\Project\\foodrecomandation"
+      "cwd": "/path/to/FoodMCP"
     }
   }
 }
 ```
+> Windows 下 `command` 改为 `C:\\path\\to\\FoodMCP\\.venv\\Scripts\\python.exe`，`cwd` 同理。
 
 ### 可用 MCP Tools 列表：
 1. `search_dish_by_semantic_review`：输入口语化口味需求，返回 Milvus 向量相似度最高的菜品与 UP 主评价。
