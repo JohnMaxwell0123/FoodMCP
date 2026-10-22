@@ -104,11 +104,13 @@ flowchart TD
         M & N & O --> P[FoodMCP Server - stdio]
         P --> Q[Tool: search_dish_by_semantic_review]
         P --> R[Tool: get_restaurant_detailed_review]
+        P --> U[Tool: compare_restaurants]
+        P --> V[Tool: get_up_taste_profile]
         P --> S[Tool: generate_food_tour_itinerary]
     end
 
     subgraph ConsumerLayer [" 6. Agent 消费端 "]
-        Q & R & S <==>|JSON-RPC via stdio| T[Claude Desktop / Cursor / 自研 Agent]
+        Q & R & U & V & S <==>|JSON-RPC via stdio| T[Claude Desktop / Cursor / 自研 Agent]
     end
 
     style FoodMCP fill:#f9f,stroke:#333,stroke-width:2px
@@ -139,7 +141,7 @@ flowchart TD
 * **方案**：集成高德 Web 服务 API，在流水线中自动提取“餐厅名 + 城市”并执行 POI 检索与地理编码，补全行政区划与真实高精度经纬度，为行程规划工具提供精准物理空间距离计算基础。
 
 ### 5. 🔌 原生 Model Context Protocol (MCP) 协议落地
-* 严格基于 Anthropic 官方 `mcp-python` SDK 规范，通过 `stdio` 协议暴露 3 个核心原子能力，无缝接入主流智能体（Claude Desktop, Cursor, Goose, LangChain）。
+* 严格基于 Anthropic 官方 `mcp-python` SDK 规范，通过 `stdio` 协议暴露 5 个核心原子能力，无缝接入主流智能体（Claude Desktop, Cursor, Goose, LangChain）。
 
 ---
 
@@ -154,7 +156,7 @@ flowchart TD
 | **入库餐厅** | 2 家（8.4 优雅河鲜、山居满陇） |
 | **提取精细化菜品** | 11 道（包含口感、色泽、锅气、刀工等多维度细节与原话） |
 | **三库存储写入率** | 100%（PG 实体、Neo4j 节点边、Milvus 向量全部一致写入） |
-| **核心单元测试** | 11 / 11 全部通过 |
+| **核心单元测试** | 37 / 37 全部通过 |
 
 ---
 
@@ -248,7 +250,9 @@ python -m scripts.run_pipeline --up-mid 1462401621 --city 北京 --limit 5
 ### 可用 MCP Tools 列表：
 1. `search_dish_by_semantic_review`：输入口语化口味需求，返回 Milvus 向量相似度最高的菜品与 UP 主评价。
 2. `get_restaurant_detailed_review`：联合 PG 与 Neo4j 查询特定餐厅的多 UP 主综合评测与菜品红黑榜。
-3. `generate_food_tour_itinerary`：指定城市与天数，结合地理坐标自动生成连贯的美食打卡路线规划。
+3. `compare_restaurants`：横向 PK 两家餐厅，对比 UP 主探访、推荐/一般/踩雷分布、好评率与避雷率，并列出各自的招牌红榜与踩雷黑榜。
+4. `get_up_taste_profile`：输入 UP 主名称，返回其探店城市足迹、常探菜系占比、排雷严苛度等级，以及最推崇的必吃菜与公开踩雷菜（附原话）。
+5. `generate_food_tour_itinerary`：指定城市与天数，结合高德 POI 经纬度按就近原则聚类，生成不绕路的美食打卡路线规划。
 
 ---
 
@@ -263,12 +267,14 @@ foodrecomandation/
 │   ├── collector/           # B站采集引擎 (curl_cffi 防风控 + 视频筛选 + 字幕下载)
 │   ├── transcriber/         # Whisper 语音转录 (本地 ASR 降级方案)
 │   ├── extractor/           # LLM 结构化信息抽取 (Prompt + 容错校验器)
+│   ├── eval/                # LLM 抽取评测引擎 (NER F1 / 情感混淆矩阵 / 原文保真度与幻觉率)
 │   ├── geocode/             # 高德地图 POI 检索与地理编码
 │   ├── storage/             # 异构存储层 (PostgreSQL + Neo4j + Milvus)
 │   ├── pipeline/            # 端到端自动化 Pipeline 编排
 │   └── mcp_server/          # 原生 Model Context Protocol 服务端
 ├── scripts/
 │   ├── run_pipeline.py      # CLI 执行入口
+│   ├── run_eval.py          # 基于 data/eval 黄金集的抽取评测 CLI (支持 --mock 离线模式)
 │   └── demo_bilibili.py     # 连通性测试脚本
 ├── tests/                   # 核心模块自动化单元测试
 ├── docker-compose.yml       # 一键三库编排文件
