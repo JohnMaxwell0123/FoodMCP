@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.models.entities import (
-    ExtractionResult, PipelineTask, TaskStatus, TranscriptResult, VideoInfo,
+    ExtractedDish, ExtractedRestaurant, ExtractionResult, PipelineTask, TaskStatus,
+    TranscriptResult, VideoInfo,
 )
 from src.pipeline.runner import PipelineRunner
 from src.storage.pg_store import PostgresStore
@@ -183,3 +184,50 @@ class TestPipelineRunnerResumption:
         assert task.status == TaskStatus.FAILED
         assert task.error_message == "无可用字幕"
         assert runner.pg.upsert_pipeline_task.called
+
+
+class TestStoreExtractionSentiment:
+    """测试多UP主评价写入时菜品情感分的聚合顺序"""
+
+    @pytest.mark.asyncio
+    async def test_dish_sentiment_refreshed_after_review_and_synced_to_graph(self) -> None:
+        """评价落库后按真实均值重算菜品情感分，并以该值写入 Neo4j 菜品节点"""
+        runner = PipelineRunner()
+        calls: list[str] = []
+
+        runner.pg = MagicMock()
+        runner.pg.find_up_master_by_uid = AsyncMock(return_value=None)
+        runner.pg.upsert_up_master = AsyncMock()
+        runner.pg.find_restaurant_by_name = AsyncMock(return_value={"id": "rest-001"})
+        runner.pg.upsert_restaurant = AsyncMock()
+        runner.pg.upsert_dish = AsyncMock(return_value="dish-001")
+        runner.pg.insert_review = AsyncMock(side_effect=lambda r: calls.append("insert_review"))
+
+        async def _refresh(dish_id: str) -> float:
+            calls.append("refresh")
+            return 0.27
+
+        runner.pg.refresh_dish_sentiment = _refresh
+
+        runner.neo4j = MagicMock()
+        runner.neo4j.merge_up_master = AsyncMock()
+        runner.neo4j.merge_restaurant = AsyncMock()
+        runner.neo4j.merge_dish = AsyncMock(side_effect=lambda d, rid: calls.append("merge_dish"))
+        runner.neo4j.create_review_relations = AsyncMock()
+
+        runner.amap.resolve_address = AsyncMock(return_value=None)
+        runner.llm.get_embedding = AsyncMock(return_value=[0.0])
+        runner.vector = MagicMock()
+
+        extraction = ExtractionResult(restaurants=[
+            ExtractedRestaurant(name="测试餐厅", dishes=[
+                ExtractedDish(name="红烧肉", verdict="踩雷", original_quote="太咸了"),
+            ]),
+        ])
+        video = VideoInfo(bvid="BV_MULTI", title="探店", up_mid="300", up_name="老饕")
+
+        await runner._store_extraction(video=video, extraction=extraction, city="北京")
+
+        assert calls == ["insert_review", "refresh", "merge_dish"]
+        synced_dish = runner.neo4j.merge_dish.call_args[0][0]
+        assert synced_dish.avg_sentiment == 0.27

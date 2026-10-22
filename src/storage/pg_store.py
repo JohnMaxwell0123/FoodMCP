@@ -296,14 +296,13 @@ class PostgresStore:
     # =========================================================
 
     async def upsert_dish(self, dish: Dish) -> str:
-        """插入或更新菜品（按餐厅ID + 菜名联合唯一去重并聚合情感分）"""
+        """插入或更新菜品（按餐厅ID + 菜名联合唯一去重；情感分由 refresh_dish_sentiment 聚合）"""
         sql = """
             INSERT INTO dishes (id, name, category, price, restaurant_id, avg_sentiment)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (restaurant_id, name) DO UPDATE SET
                 category = CASE WHEN EXCLUDED.category != '' THEN EXCLUDED.category ELSE dishes.category END,
-                price = COALESCE(EXCLUDED.price, dishes.price),
-                avg_sentiment = ROUND(((dishes.avg_sentiment + EXCLUDED.avg_sentiment) / 2.0)::numeric, 2)
+                price = COALESCE(EXCLUDED.price, dishes.price)
             RETURNING id
         """
         async with self._conn.cursor() as cur:
@@ -314,6 +313,21 @@ class PostgresStore:
             )
             row = await cur.fetchone()
         return row[0]
+
+    async def refresh_dish_sentiment(self, dish_id: str) -> float:
+        """按该菜品全部评价重算平均情感分（与写入顺序无关），返回最新值"""
+        sql = """
+            UPDATE dishes SET avg_sentiment = COALESCE(
+                (SELECT ROUND(AVG(sentiment_score)::numeric, 2) FROM reviews WHERE dish_id = %s),
+                avg_sentiment
+            )
+            WHERE id = %s
+            RETURNING avg_sentiment
+        """
+        async with self._conn.cursor() as cur:
+            await cur.execute(sql, (dish_id, dish_id))
+            row = await cur.fetchone()
+        return float(row[0]) if row else 0.0
 
     async def find_dish_by_name(self, restaurant_id: str, name: str) -> dict | None:
         """查找指定餐厅下的菜品"""

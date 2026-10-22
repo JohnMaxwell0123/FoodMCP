@@ -301,7 +301,6 @@ class PipelineRunner:
                 )
                 persisted_dish_id = await self.pg.upsert_dish(dish)
                 dish.id = persisted_dish_id  # 统一使用已持久化的唯一 ID
-                await self.neo4j.merge_dish(dish, restaurant.id)
 
                 # 存储评价
                 sentiment_enum = {
@@ -327,6 +326,9 @@ class PipelineRunner:
                     aspects=aspects,
                 )
                 await self.pg.insert_review(review)
+                # 多UP主评价按真实均值聚合，再同步到图谱节点
+                dish.avg_sentiment = await self.pg.refresh_dish_sentiment(dish.id)
+                await self.neo4j.merge_dish(dish, restaurant.id)
                 await self.neo4j.create_review_relations(review, video.bvid)
 
                 # 存储向量
