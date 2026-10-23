@@ -22,15 +22,16 @@ from config.settings import settings
 from src.collector.bilibili_client import BilibiliClient
 from src.collector.subtitle_extractor import SubtitleExtractor
 from src.collector.video_filter import VideoFilter
+from src.evidence.quotes import format_timestamp, locate_quote, published_date
 from src.extractor.llm_client import LLMClient
 from src.models.entities import (
     Dish, ExtractionResult, PipelineTask, Restaurant,
-    Review, Sentiment, TaskStatus, UPMaster, VideoInfo, AspectReview,
+    Review, Sentiment, TaskStatus, TranscriptResult, UPMaster, VideoInfo, AspectReview,
 )
 from src.storage.pg_store import PostgresStore
 from src.storage.neo4j_store import Neo4jStore
 from src.storage.vector_store import VectorStore
-from src.geocode.amap_client import AmapClient
+from src.geocode.amap_client import AmapClient, normalize_city
 
 
 class PipelineRunner:
@@ -86,6 +87,7 @@ class PipelineRunner:
             处理任务列表
         """
         settings.ensure_data_dirs()
+        city = normalize_city(city)
 
         logger.info(
             f"=== Pipeline 启动: UP主={up_mid}, 城市={city}, 限制={limit}, 续传={resume} ==="
@@ -170,6 +172,17 @@ class PipelineRunner:
                         transcript_text=text,
                     )
                     task.extraction = extraction
+
+                    # LLM 客户端内部已带重试；仍失败时标记 FAILED（下次运行会重新处理），
+                    # 而不是当作"抽到 0 家餐厅"落盘——否则断点续传会永久跳过这个视频
+                    if extraction.error:
+                        logger.warning(f"视频 {video.bvid} 信息抽取失败: {extraction.error}")
+                        task.status = TaskStatus.FAILED
+                        task.error_message = extraction.error
+                        if not skip_store:
+                            await self.pg.upsert_pipeline_task(task)
+                        break
+
                     task.status = TaskStatus.EXTRACTED
                     if not skip_store:
                         await self.pg.upsert_pipeline_task(task)
@@ -178,8 +191,9 @@ class PipelineRunner:
                     if not skip_store:
                         task.stage = "storage"
                         if extraction.restaurants:
-                            await self._store_extraction(
+                            task.verified_quote_count = await self._store_extraction(
                                 video=video, extraction=extraction, city=city,
+                                transcript=transcript,
                             )
                             task.restaurant_count = len(extraction.restaurants)
                             task.dish_count = sum(len(r.dishes) for r in extraction.restaurants)
@@ -225,6 +239,12 @@ class PipelineRunner:
             sum(len(r.dishes) for r in t.extraction.restaurants)
             for t in tasks if t.extraction and t.extraction.restaurants
         )
+        stored = [t for t in tasks if t.status == TaskStatus.STORED]
+        stored_dishes = sum(t.dish_count for t in stored)
+        verified_quotes = sum(t.verified_quote_count for t in stored)
+        verifiable_rate = (
+            f"{verified_quotes / stored_dishes * 100:.1f}%" if stored_dishes else "N/A"
+        )
 
         logger.info(
             f"=== Pipeline 完成 ===\n"
@@ -232,7 +252,8 @@ class PipelineRunner:
             f"  落盘成功: {stored_count}\n"
             f"  断点跳过: {skipped_count}\n"
             f"  处理失败: {failed_count}\n"
-            f"  累计提取: {total_restaurants} 个餐厅, {total_dishes} 道菜品"
+            f"  累计提取: {total_restaurants} 个餐厅, {total_dishes} 道菜品\n"
+            f"  原话可核对: {verified_quotes}/{stored_dishes} (可核对率 {verifiable_rate})"
         )
 
         # 保存报告
@@ -241,9 +262,23 @@ class PipelineRunner:
         return tasks
 
     async def _store_extraction(
-        self, video: VideoInfo, extraction: ExtractionResult, city: str,
-    ) -> None:
-        """将提取结果存储到三个数据库"""
+        self,
+        video: VideoInfo,
+        extraction: ExtractionResult,
+        city: str,
+        transcript: TranscriptResult | None = None,
+    ) -> int:
+        """
+        将提取结果存储到三个数据库
+
+        每条原话入库前先对回字幕：对上的记为已核验，并以对上的字幕片段起点作为视频内时间点
+        （LLM 看不到时间轴，它给的时间不可信）。
+
+        Returns:
+            原话能在字幕中找到的菜品数
+        """
+        verified_count = 0
+        video_date = published_date(video.publish_date)
 
         # 确保UP主存在
         up = UPMaster(bilibili_uid=video.up_mid, name=video.up_name)
@@ -273,17 +308,18 @@ class PipelineRunner:
                 city=city or self._guess_city_from_location(ext_rest.location),
             )
             if geo:
+                geo_city = normalize_city(geo.city)
                 await self.pg.update_restaurant_geo(
                     restaurant_id=restaurant.id,
                     address=geo.address,
-                    city=geo.city,
+                    city=geo_city,
                     district=geo.district,
                     latitude=geo.latitude,
                     longitude=geo.longitude,
                     geo_verified=geo.is_verified,
                 )
                 restaurant.address = geo.address
-                restaurant.city = geo.city
+                restaurant.city = geo_city
                 restaurant.latitude = geo.latitude
                 restaurant.longitude = geo.longitude
                 restaurant.geo_verified = geo.is_verified
@@ -314,12 +350,21 @@ class PipelineRunner:
                     if k in ("taste", "texture", "portion", "presentation", "value")
                 })
 
+                match = locate_quote(ext_dish.original_quote, transcript)
+                if match.verified:
+                    verified_count += 1
+                else:
+                    logger.info(f"原话未能在字幕中找到（标记为未核验）: {ext_dish.name}")
+
                 review = Review(
                     up_master_id=up.id,
                     dish_id=dish.id,
                     restaurant_id=restaurant.id,
                     video_bvid=video.bvid,
-                    timestamp=ext_dish.timestamp,
+                    timestamp=format_timestamp(match.start_seconds),
+                    timestamp_seconds=match.start_seconds,
+                    quote_verified=match.verified,
+                    video_published_at=video_date,
                     raw_text=ext_dish.original_quote,
                     sentiment=sentiment_enum,
                     sentiment_score=sentiment_map.get(ext_dish.verdict, 0.0),
@@ -340,13 +385,16 @@ class PipelineRunner:
                         "review_id": review.id,
                         "dish_name": ext_dish.name,
                         "restaurant_name": ext_rest.name,
-                        "city": city,
+                        # 与 PG 用同一个城市（未传 --city 时取地理编码结果），否则语义检索永远搜不到
+                        "city": restaurant.city if restaurant.city != "未知" else "",
                         "sentiment": ext_dish.verdict,
                         "text": embedding_text[:2000],
                         "embedding": embedding,
                     }])
                 except Exception as e:
                     logger.warning(f"向量存储失败: {e}")
+
+        return verified_count
 
     @staticmethod
     def _guess_city_from_location(location: str) -> str:
@@ -381,6 +429,7 @@ class PipelineRunner:
                 "error": task.error_message,
                 "restaurant_count": task.restaurant_count,
                 "dish_count": task.dish_count,
+                "verified_quote_count": task.verified_quote_count,
             }
             if task.extraction:
                 entry["restaurants"] = [

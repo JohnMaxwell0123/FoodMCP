@@ -1,13 +1,41 @@
 # 📋 项目进度追踪
 
 > **项目名称：** B站探店视频深度解析与 Agent MCP 服务
-> **最后更新：** 2026-10-22
-> **当前阶段：** Phase 1 — MVP 概念验证（已完成）→ GitHub 开源发布
-> **整体进度：** ██████████ 100%（全链路打通，三库存储 + 地理编码，已推送到 GitHub 开源）
+> **最后更新：** 2026-10-23
+> **当前阶段：** Phase 1.6 — 证据链与可信度复盘（已完成）→ Phase 2 可信度
+> **整体进度：** MVP 全链路打通；证据链已落地；来源可信与结果可信仍在设计中
 
 ---
 
 ## 🏗️ 已完成的工作
+
+### 2026-10-23 — 证据链落地与可信度复盘
+
+**完成内容：** 按复盘结论把"可信"从文档落到接口：原话回查字幕并记录视频时间点，所有 MCP 返回值附出处，按 UP 主计票替代平均分，修正两处静默错误；PORTFOLIO 细化可信模型并新增鸭觅对照章节。全套单元测试 **65/65 通过**。
+- [x] **证据层 `src/evidence/`**：
+  - `quotes.py`：原话回查字幕（精确匹配或容忍 ASR 错字的模糊匹配），对上的取字幕片段起点作为视频时间点，生成 B 站跳转链接；评测的保真度改为调用同一函数，离线与线上同一口径。
+  - `consensus.py`：每位 UP 主对每道菜只算一票（重复评价只算一次），输出孤证/共识/争议；避雷判定要求至少一条踩雷原话已核验。
+- [x] **数据模型**：`Review` 新增 `quote_verified`、`timestamp_seconds`、`video_published_at`（`init_tables` 自动迁移）；`PipelineTask` 新增 `verified_quote_count`；`UPMaster.credibility_score` 默认为空。
+- [x] **MCP 工具**：
+  - 检索结果按 `review_id` 回查出处（UP 主、视频链接带时间点、发布日期、`quote_verified`），并去掉重跑留下的重复原话。
+  - 餐厅详情改为菜品级证据分布，不再输出平均分。
+  - 餐厅对比优先比较共同评价者，任一家少于 3 条判定时不给结论（此前 1/1 好评会赢过 9/10）。
+  - UP 主画像：`harshness_level`（"毒舌/真实"）改为中性的 `selectivity`，并返回推荐率基线；不再对外返回未计算的可信度 0.5。
+  - 行程规划：把避雷菜和原话交给 LLM，温度降到 0.2，并删除 LLM 新增的餐厅、菜品与原话（此前要求 LLM 输出避雷菜、原话、人均，却没给它这些数据）。
+  - 引用规范写进 Tool 描述。
+- [x] **Pipeline**：
+  - LLM 调用失败时标记 FAILED（此前被标为 STORED 并被断点续传永久跳过）。
+  - Prompt 要求原话逐字摘录、去掉 LLM 无法知道的时间戳字段、写入"宁轻勿重"的判定口径。
+  - 高德返回的"北京市"统一为"北京"；未传 `--city` 时向量库使用地理编码得到的城市，不再写入空城市。
+  - 运行汇总输出可核对率。
+- [x] **SchemaValidator**：非标准判定只按白名单映射（此前子串规则会把"不推荐""不好吃"判成推荐），其余记为"一般"并保留原值待复核。
+- [x] **UP 主写入**：冲突时只更新名称，不再用默认值覆盖可信度、粉丝数与风格标签（PG 与 Neo4j）。
+- [x] **回填脚本** `scripts/backfill_evidence.py`：用缓存字幕为已入库评价回填核验结果与时间点，可选补全发布日期；不调用 LLM，不产生重复评价。
+- [x] **黄金集**改用虚构的餐厅与 UP 主并标注为合成样本（此前把手写的尖锐差评挂在真实 UP 主与真实餐厅名下）。
+- [x] **文档口径校正**：去掉"首个"、自评五星（改为机制描述）、"数十种口语映射字典"、"规则准确过滤"、"三库 100% 一致写入"等无法证实的表述；架构愿景图加注"非当前实现"；412 处理从核心难点降为工程备注；proposal.md 加注被修正的判断；presentation.html 与 PORTFOLIO 同步。
+- **对早期记录的更正：**
+  - 2026-09-09 记录的"彻底根除'山居满陇'误配"不成立：在 `--city 北京` 下，该农家院得分 0.515，仍高于拒绝线 0.45，会被当作未核验结果采纳。根因是城市为运行级参数，待按餐厅推断城市。
+  - 2026-09-09 记录的"针对 LLM 429 指数退避重试"：LLM 异常在客户端内部被吞掉，运行层的重试从未作用于 LLM（失败视频此前会被标为 STORED，本次已修复）。运行层重试实际只会因数据库异常触发，而评价写入尚不幂等。
 
 ### 2026-10-22 — 情感分聚合修正与可信度模型
 
@@ -238,11 +266,16 @@ foodrecomandation/
 │   │   ├── video_filter.py        # 视频筛选
 │   │   └── subtitle_extractor.py  # 字幕提取
 │   ├── transcriber/
-│   │   └── whisper_transcriber.py # ASR转写
+│   │   └── whisper_transcriber.py # ASR转写（尚未接入流水线）
 │   ├── extractor/
 │   │   ├── prompts.py             # Prompt模板
 │   │   ├── llm_client.py          # LLM客户端（DeepSeek + OpenAI 双API）
 │   │   └── schema_validator.py    # Schema校验
+│   ├── evidence/
+│   │   ├── quotes.py              # 原话核验、视频时间点、跳转链接
+│   │   └── consensus.py           # 按 UP 主计票：孤证/共识/争议
+│   ├── eval/
+│   │   └── evaluator.py           # 抽取评测（实体F1/混淆矩阵/保真度）
 │   ├── geocode/
 │   │   └── amap_client.py         # 高德地图 POI 搜索 & 地理编码
 │   ├── storage/
@@ -250,15 +283,15 @@ foodrecomandation/
 │   │   ├── neo4j_store.py         # Neo4j
 │   │   └── vector_store.py        # Milvus
 │   ├── pipeline/
-│   │   └── runner.py              # Pipeline编排（含地理编码步骤）
+│   │   └── runner.py              # Pipeline编排（含原话核验与地理编码）
 │   └── mcp_server/
-│       └── server.py              # MCP Server（3个Tool）
+│       └── server.py              # MCP Server（5个Tool）
 ├── scripts/
 │   ├── run_pipeline.py            # CLI入口
+│   ├── run_eval.py                # 抽取评测CLI
+│   ├── backfill_evidence.py       # 为已有评价回填证据字段
 │   └── demo_bilibili.py           # B站API独立测试脚本
-├── tests/
-│   ├── test_collector.py
-│   └── test_extractor.py
+├── tests/                         # 单元测试（65个）
 ├── data/
 │   ├── subtitles/                 # 字幕缓存（11个视频）
 │   ├── extractions/               # Pipeline 运行报告
@@ -319,6 +352,16 @@ foodrecomandation/
 - ~~**已解决**：`vector_store.py` 的 EMBEDDING_DIM 硬编码为 1536 — 已在 settings.embedding.dimension 中动态读取配置~~
 - ~~**已解决**：Pipeline 缺少断点续传机制 — 已实现 pipeline_tasks 状态持久化、--resume 断点跳过与指数退避重试~~
 - ~~**已解决**：MCP Server 的 startup 中数据库连接失败只是 warning — 已引入 MCP_STRICT_STORAGE 强校验环境变量开关~~
+- ~~**已解决**：LLM 调用失败的视频被标为 STORED 并被断点续传永久跳过 — 现标记 FAILED，下次运行自动重试~~
+- ~~**已解决**：字幕时间戳在交给 LLM 前被丢弃，"可跳转验证"无法成立 — 现由原话回查字幕得到时间点~~
+- ~~**已解决**：不传 `--city` 时向量库城市为空 — 现使用地理编码得到的城市~~
+- **评价写入不幂等**：重试或重跑会产生重复的评价与向量。读取侧已按"每位 UP 主一票"去重计票，检索结果也会去掉重复原话；存储侧待改用确定性 ID
+- **餐厅去重会跨城、跨分店合并**（`find_restaurant_by_name` 的全局匹配）
+- **城市是运行级参数**：UP 主跨城探店时会被标错城市；待按餐厅推断
+- **保真度只核验"有没有说过"**，不核验"是不是在说这道菜"
+- **黄金集为合成样本**：踩雷全是明说的，测不出含蓄差评；待用真实字幕建立评测集
+- **合作声明识别**：视频简介已采集但未落库
+- **Whisper 兜底未接入**：无字幕视频直接标记 FAILED
 - **注意**：高频请求（连续多个 UP 主无间隔）仍可能触发 412，需保持 ≥2s 请求间隔
 - **注意**：部分 UP 主视频列表可能返回空（隐私设置或 API 限制），需要在 Pipeline 中做容错处理
 - `neo4j_store.py` 中的 MERGE 关系查询在大数据量下可能需要优化索引
@@ -336,3 +379,4 @@ foodrecomandation/
 8. **PG 驱动**: asyncpg → psycopg3（Windows 兼容性），连接端口 5433 避开本地 PG 冲突
 9. **任务状态机与断点续传**: PostgreSQL `pipeline_tasks` 表记录阶段与重试，默认 `--resume` 秒级跳过已落盘视频，并在网络抖动/限流时启用指数退避重试保护。
 10. **MCP 核心工具体系**: 扩充至 5 大工业级 Tool，支持跨店横向评价对比、UP 主口味偏好与排雷严苛度画像、以及基于高德真实 POI 坐标就近聚类规划的美食路线。
+11. **证据优先**（2026-10）: 原话必须能对回字幕，时间点由字幕而非 LLM 给出；不输出平均分，按 UP 主计票并标注孤证/共识/争议；负面结论要求原话已核验；所有 MCP 返回值附出处。详见 PORTFOLIO 第六章。

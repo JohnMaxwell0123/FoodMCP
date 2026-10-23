@@ -20,7 +20,7 @@ class TestExtractionEvaluator:
         ground_truth = {
             "restaurants": [
                 {
-                    "name": "萃华楼",
+                    "name": "示例鲁菜馆",
                     "dishes": [
                         {"name": "九转大肠", "verdict": "推荐", "original_quote": "外焦里嫩太好吃了"},
                         {"name": "糟熘三白", "verdict": "踩雷", "original_quote": "完全没有味道差评"},
@@ -32,7 +32,7 @@ class TestExtractionEvaluator:
         predicted = ExtractionResult(
             restaurants=[
                 ExtractedRestaurant(
-                    name="萃华楼",
+                    name="示例鲁菜馆",
                     dishes=[
                         ExtractedDish(name="九转大肠", verdict="推荐", original_quote="外焦里嫩太好吃了"),
                         ExtractedDish(name="糟熘三白", verdict="踩雷", original_quote="完全没有味道差评"),
@@ -42,7 +42,7 @@ class TestExtractionEvaluator:
             confidence=1.0,
         )
 
-        transcript = "今天来到萃华楼，九转大肠外焦里嫩太好吃了，糟熘三白完全没有味道差评"
+        transcript = "今天来到示例鲁菜馆，九转大肠外焦里嫩太好吃了，糟熘三白完全没有味道差评"
 
         result = ExtractionEvaluator.evaluate_sample(
             sample_id="test_01",
@@ -104,7 +104,7 @@ class TestExtractionEvaluator:
         ground_truth = {
             "restaurants": [
                 {
-                    "name": "朱光玉火锅",
+                    "name": "示例火锅店",
                     "dishes": [
                         {"name": "麻辣红锅", "verdict": "踩雷"},
                     ],
@@ -116,7 +116,7 @@ class TestExtractionEvaluator:
         predicted = ExtractionResult(
             restaurants=[
                 ExtractedRestaurant(
-                    name="朱光玉火锅",
+                    name="示例火锅店",
                     dishes=[
                         ExtractedDish(name="麻辣红锅", verdict="推荐"),
                     ],

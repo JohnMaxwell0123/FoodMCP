@@ -7,13 +7,13 @@ LLM 抽取 Eval 评测核心引擎
 
 from __future__ import annotations
 
-import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from loguru import logger
 from rapidfuzz import fuzz
 
+from src.evidence.quotes import match_quote
 from src.models.entities import ExtractionResult
 
 # 规范化情感类别
@@ -154,7 +154,6 @@ class ExtractionEvaluator:
 
     RESTAURANT_MATCH_THRESHOLD: float = 75.0
     DISH_MATCH_THRESHOLD: float = 70.0
-    QUOTE_MATCH_THRESHOLD: float = 80.0
 
     @classmethod
     def evaluate_sample(
@@ -304,30 +303,20 @@ class ExtractionEvaluator:
         )
 
         # --- 4. 保真度与抗幻觉计算 ---
+        # 与入库时的原话核验共用同一套规则（src/evidence/quotes.py），离线保真率与线上 quote_verified 同口径。
+        # 注意：只核验"这句话有没有说过"，不核验"是不是在说这道菜"。
         faithful_cnt = 0
         hallucinated_cnt = 0
-        clean_transcript = re.sub(r"[^\w\u4e00-\u9fa5]", "", transcript_text)
 
         for p_r in pred_restaurants:
             for p_d in p_r.dishes:
-                quote = p_d.original_quote.strip()
-                if not quote or len(quote) < 3:
+                match = match_quote(p_d.original_quote, transcript_text)
+                if not match.checked:
                     continue
-
-                clean_quote = re.sub(r"[^\w\u4e00-\u9fa5]", "", quote)
-                if not clean_quote:
-                    continue
-
-                # 检查是否包含在字幕文本中
-                if clean_quote in clean_transcript:
+                if match.verified:
                     faithful_cnt += 1
                 else:
-                    # 使用 partial_ratio 容忍微小 ASR 切词差异
-                    partial_sim = fuzz.partial_ratio(clean_quote, clean_transcript)
-                    if partial_sim >= cls.QUOTE_MATCH_THRESHOLD:
-                        faithful_cnt += 1
-                    else:
-                        hallucinated_cnt += 1
+                    hallucinated_cnt += 1
 
         total_quotes = faithful_cnt + hallucinated_cnt
         faithfulness_rate = faithful_cnt / total_quotes if total_quotes > 0 else 1.0

@@ -94,3 +94,29 @@ class TestSchemaValidator:
         result = self.validator.validate_extraction(raw)
         assert len(result.restaurants[0].dishes) == 1
         assert result.restaurants[0].dishes[0].name == "真实菜品"
+
+    def test_verdict_whitelist_never_guesses(self):
+        """非标准判定只按白名单映射：否定词不会再被子串规则判反"""
+        raw = '''{"restaurants": [{"name": "R1", "dishes": [
+            {"name": "D1", "verdict": "不推荐", "original_quote": "test"},
+            {"name": "D2", "verdict": "不好吃", "original_quote": "test"},
+            {"name": "D3", "verdict": "不错", "original_quote": "test"},
+            {"name": "D4", "verdict": "绝了", "original_quote": "test"},
+            {"name": "D5", "verdict": "推荐", "original_quote": "test"}
+        ]}]}'''
+        result = self.validator.validate_extraction(raw)
+        dishes = {d.name: d for d in result.restaurants[0].dishes}
+        assert dishes["D1"].verdict == "踩雷"
+        assert dishes["D2"].verdict == "踩雷"
+        # 白名单之外的值记为"一般"并保留原值待复核
+        assert dishes["D3"].verdict == "一般" and dishes["D3"].verdict_raw == "不错"
+        assert dishes["D4"].verdict == "一般" and dishes["D4"].verdict_raw == "绝了"
+        assert dishes["D5"].verdict_raw == ""
+
+    def test_non_standard_verdict_lowers_completeness(self):
+        """LLM 没按枚举输出时，字段完整度（confidence）相应降低"""
+        template = '{"restaurants": [{"name": "R1", "dishes": [{"name": "D1", "verdict": "%s", "original_quote": "test"}]}]}'
+        standard = self.validator.validate_extraction(template % "推荐")
+        mapped = self.validator.validate_extraction(template % "好吃推荐")
+        assert mapped.restaurants[0].dishes[0].verdict == "推荐"
+        assert standard.confidence > mapped.confidence

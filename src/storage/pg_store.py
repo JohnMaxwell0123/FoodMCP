@@ -16,6 +16,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from config.settings import settings
+from src.geocode.amap_client import normalize_city
 from src.models.entities import (
     Dish, PipelineTask, Restaurant, Review, TaskStatus, UPMaster,
 )
@@ -58,7 +59,7 @@ CREATE TABLE IF NOT EXISTS up_masters (
     name VARCHAR(255) NOT NULL,
     follower_count INTEGER DEFAULT 0,
     style_tags JSONB DEFAULT '[]',
-    credibility_score DOUBLE PRECISION DEFAULT 0.5,
+    credibility_score DOUBLE PRECISION,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -70,6 +71,9 @@ CREATE TABLE IF NOT EXISTS reviews (
     restaurant_id VARCHAR(36) REFERENCES restaurants(id),
     video_bvid VARCHAR(50) NOT NULL,
     timestamp VARCHAR(50) DEFAULT '',
+    timestamp_seconds DOUBLE PRECISION,
+    quote_verified BOOLEAN DEFAULT FALSE,
+    video_published_at VARCHAR(20) DEFAULT '',
     raw_text TEXT NOT NULL,
     sentiment VARCHAR(20) NOT NULL,
     sentiment_score DOUBLE PRECISION DEFAULT 0.0,
@@ -89,6 +93,7 @@ CREATE TABLE IF NOT EXISTS pipeline_tasks (
     transcript_source VARCHAR(20) DEFAULT '',
     restaurant_count INTEGER DEFAULT 0,
     dish_count INTEGER DEFAULT 0,
+    verified_quote_count INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -171,6 +176,15 @@ class PostgresStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_up_mid ON pipeline_tasks(up_mid);
                 CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_status ON pipeline_tasks(status);
+                """
+            )
+            # 证据字段：原话核验结果、视频内时间点、视频发布日期
+            await cur.execute(
+                """
+                ALTER TABLE reviews ADD COLUMN IF NOT EXISTS timestamp_seconds DOUBLE PRECISION;
+                ALTER TABLE reviews ADD COLUMN IF NOT EXISTS quote_verified BOOLEAN DEFAULT FALSE;
+                ALTER TABLE reviews ADD COLUMN IF NOT EXISTS video_published_at VARCHAR(20) DEFAULT '';
+                ALTER TABLE pipeline_tasks ADD COLUMN IF NOT EXISTS verified_quote_count INTEGER DEFAULT 0;
                 """
             )
         logger.info("PostgreSQL 数据表初始化完成")
@@ -277,12 +291,14 @@ class PostgresStore:
             return await cur.fetchone()
 
     async def list_restaurants(self, city: str = "", limit: int = 50) -> list[dict]:
-        """列出餐厅"""
+        """列出餐厅（"北京"与高德返回的"北京市"视为同一城市）"""
         async with self._conn.cursor(row_factory=dict_row) as cur:
             if city:
+                city = normalize_city(city)
                 await cur.execute(
-                    "SELECT * FROM restaurants WHERE city = %s ORDER BY updated_at DESC LIMIT %s",
-                    (city, limit),
+                    "SELECT * FROM restaurants WHERE city IN (%s, %s) "
+                    "ORDER BY updated_at DESC LIMIT %s",
+                    (city, f"{city}市", limit),
                 )
             else:
                 await cur.execute(
@@ -352,16 +368,18 @@ class PostgresStore:
     # =========================================================
 
     async def upsert_up_master(self, up: UPMaster) -> str:
-        """插入或更新UP主"""
+        """
+        插入或更新UP主
+
+        冲突时只更新名称：管线每次都用默认值构造 UPMaster，
+        若连粉丝数、风格标签、可信度一起覆盖，离线计算好的值会被重置。
+        """
         sql = """
             INSERT INTO up_masters (id, bilibili_uid, name, follower_count,
                                     style_tags, credibility_score)
             VALUES (%s, %s, %s, %s, %s::jsonb, %s)
             ON CONFLICT (bilibili_uid) DO UPDATE SET
-                name = EXCLUDED.name,
-                follower_count = EXCLUDED.follower_count,
-                style_tags = EXCLUDED.style_tags,
-                credibility_score = EXCLUDED.credibility_score
+                name = EXCLUDED.name
             RETURNING id
         """
         async with self._conn.cursor() as cur:
@@ -402,9 +420,10 @@ class PostgresStore:
         """插入评价"""
         sql = """
             INSERT INTO reviews (id, up_master_id, dish_id, restaurant_id,
-                                 video_bvid, timestamp, raw_text, sentiment,
+                                 video_bvid, timestamp, timestamp_seconds, quote_verified,
+                                 video_published_at, raw_text, sentiment,
                                  sentiment_score, aspects)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             RETURNING id
         """
         async with self._conn.cursor() as cur:
@@ -413,12 +432,66 @@ class PostgresStore:
                     (
                         review.id, review.up_master_id, review.dish_id,
                         review.restaurant_id, review.video_bvid, review.timestamp,
+                        review.timestamp_seconds, review.quote_verified,
+                        review.video_published_at,
                         review.raw_text, review.sentiment.value, review.sentiment_score,
                         review.aspects.model_dump_json(),
                     ),
                 )
                 row = await cur.fetchone()
         return row[0]
+
+    async def get_reviews_by_ids(self, review_ids: list[str]) -> list[dict]:
+        """按评价 ID 回查出处（UP主、视频、时间点、核验结果），供检索结果附带证据"""
+        if not review_ids:
+            return []
+        sql = """
+            SELECT r.id, r.raw_text, r.sentiment, r.video_bvid, r.timestamp,
+                   r.timestamp_seconds, r.quote_verified, r.video_published_at,
+                   d.name AS dish_name, u.name AS up_name,
+                   rest.name AS restaurant_name, rest.city AS restaurant_city
+            FROM reviews r
+            JOIN dishes d ON r.dish_id = d.id
+            JOIN up_masters u ON r.up_master_id = u.id
+            JOIN restaurants rest ON r.restaurant_id = rest.id
+            WHERE r.id = ANY(%s)
+        """
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, (list(review_ids),))
+            return await cur.fetchall()
+
+    async def list_reviews_for_backfill(self) -> list[dict]:
+        """列出全部评价的出处字段，供原话核验与时间点回填"""
+        sql = """
+            SELECT id, video_bvid, raw_text, timestamp, timestamp_seconds,
+                   quote_verified, video_published_at
+            FROM reviews
+            ORDER BY video_bvid
+        """
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql)
+            return await cur.fetchall()
+
+    async def update_review_evidence(
+        self,
+        review_id: str,
+        timestamp: str,
+        timestamp_seconds: float | None,
+        quote_verified: bool,
+        video_published_at: str | None = None,
+    ) -> None:
+        """回写一条评价的核验结果与时间点（发布日期为空时保留原值）"""
+        sql = """
+            UPDATE reviews
+            SET timestamp = %s, timestamp_seconds = %s, quote_verified = %s,
+                video_published_at = COALESCE(NULLIF(%s, ''), video_published_at)
+            WHERE id = %s
+        """
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                sql,
+                (timestamp, timestamp_seconds, quote_verified, video_published_at or "", review_id),
+            )
 
     async def get_reviews_for_restaurant(self, restaurant_id: str) -> list[dict]:
         """获取餐厅的所有评价"""
@@ -472,20 +545,22 @@ class PostgresStore:
         sql = """
             INSERT INTO pipeline_tasks (
                 bvid, up_mid, title, status, stage, retry_count,
-                error_message, transcript_source, restaurant_count, dish_count, updated_at
+                error_message, transcript_source, restaurant_count, dish_count,
+                verified_quote_count, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (bvid) DO UPDATE SET
                 status = EXCLUDED.status,
                 stage = EXCLUDED.stage,
                 retry_count = EXCLUDED.retry_count,
                 error_message = EXCLUDED.error_message,
-                transcript_source = CASE 
-                    WHEN EXCLUDED.transcript_source != '' THEN EXCLUDED.transcript_source 
-                    ELSE pipeline_tasks.transcript_source 
+                transcript_source = CASE
+                    WHEN EXCLUDED.transcript_source != '' THEN EXCLUDED.transcript_source
+                    ELSE pipeline_tasks.transcript_source
                 END,
                 restaurant_count = EXCLUDED.restaurant_count,
                 dish_count = EXCLUDED.dish_count,
+                verified_quote_count = EXCLUDED.verified_quote_count,
                 updated_at = NOW()
         """
         status_val = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
@@ -503,6 +578,7 @@ class PostgresStore:
                     task.transcript_source,
                     task.restaurant_count,
                     task.dish_count,
+                    task.verified_quote_count,
                 ),
             )
 

@@ -94,6 +94,7 @@ class TestPostgresPipelineState:
         assert params_arg[7] == "ai"
         assert params_arg[8] == 1
         assert params_arg[9] == 5
+        assert params_arg[10] == 0  # verified_quote_count
 
     @pytest.mark.asyncio
     async def test_get_completed_bvids(self) -> None:
@@ -231,3 +232,103 @@ class TestStoreExtractionSentiment:
         assert calls == ["insert_review", "refresh", "merge_dish"]
         synced_dish = runner.neo4j.merge_dish.call_args[0][0]
         assert synced_dish.avg_sentiment == 0.27
+
+
+class TestEvidenceAndFailureHandling:
+    """抽取失败不得被当作"已落盘"；入库时核验原话并记录出处"""
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_marks_task_failed_not_stored(self) -> None:
+        """LLM 调用失败时标记 FAILED，下次运行会重新处理，而不是被断点续传永久跳过"""
+        runner = PipelineRunner()
+
+        video = VideoInfo(bvid="BV_LLM_DOWN", title="探店", up_mid="300", up_name="老饕")
+        runner.bilibili.get_up_videos = AsyncMock(return_value=[video])
+        runner.video_filter.filter_videos = MagicMock(return_value=[video])
+        runner.pg.get_completed_bvids = AsyncMock(return_value=set())
+        runner.pg.upsert_pipeline_task = AsyncMock()
+        runner.subtitle_extractor.extract = AsyncMock(return_value=TranscriptResult(
+            video_bvid="BV_LLM_DOWN", source="ai", full_text="今天吃了红烧肉，太咸了别点"
+        ))
+        runner.llm.extract_from_transcript = AsyncMock(
+            return_value=ExtractionResult(error="429 rate limited")
+        )
+        runner._store_extraction = AsyncMock()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            tasks = await runner.run(up_mid=300, skip_store=False, resume=True)
+
+        task = tasks[0]
+        assert task.status == TaskStatus.FAILED
+        assert task.stage == "llm"
+        assert task.error_message == "429 rate limited"
+        assert not runner._store_extraction.called
+        persisted = runner.pg.upsert_pipeline_task.call_args[0][0]
+        assert persisted.status == TaskStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_store_extraction_verifies_quotes_and_records_source(self) -> None:
+        """原话对回字幕：对上的记时间点，对不上的标未核验；向量库与 PG 使用同一个城市"""
+        from src.geocode.amap_client import GeoResult
+        from src.models.entities import SubtitleSegment
+
+        runner = PipelineRunner()
+
+        runner.pg = MagicMock()
+        runner.pg.find_up_master_by_uid = AsyncMock(return_value=None)
+        runner.pg.upsert_up_master = AsyncMock()
+        runner.pg.find_restaurant_by_name = AsyncMock(return_value=None)
+        runner.pg.upsert_restaurant = AsyncMock()
+        runner.pg.update_restaurant_geo = AsyncMock()
+        runner.pg.upsert_dish = AsyncMock(side_effect=["dish-1", "dish-2"])
+        runner.pg.insert_review = AsyncMock()
+        runner.pg.refresh_dish_sentiment = AsyncMock(return_value=0.8)
+
+        runner.neo4j = MagicMock()
+        runner.neo4j.merge_up_master = AsyncMock()
+        runner.neo4j.merge_restaurant = AsyncMock()
+        runner.neo4j.merge_dish = AsyncMock()
+        runner.neo4j.create_review_relations = AsyncMock()
+
+        runner.amap.resolve_address = AsyncMock(return_value=GeoResult(
+            name="示例河鲜馆", address="示例路1号", city="北京市", district="朝阳区",
+            latitude=39.9, longitude=116.4, source="poi", confidence=0.8, is_verified=True,
+        ))
+        runner.llm.get_embedding = AsyncMock(return_value=[0.0])
+        runner.vector = MagicMock()
+
+        transcript = TranscriptResult(
+            video_bvid="BV_EVIDENCE",
+            source="ai",
+            segments=[
+                SubtitleSegment(start=10.0, end=14.0, text="今天来到这家河鲜馆"),
+                SubtitleSegment(start=95.5, end=99.0, text="这鱼肉真的好嫩，进嘴之后不用嚼"),
+            ],
+        )
+        extraction = ExtractionResult(restaurants=[
+            ExtractedRestaurant(name="示例河鲜馆", location="北京朝阳", dishes=[
+                ExtractedDish(name="清蒸鱼", verdict="推荐", original_quote="这鱼肉真的好嫩"),
+                ExtractedDish(name="炒时蔬", verdict="一般", original_quote="字幕里根本没有这句话"),
+            ]),
+        ])
+        video = VideoInfo(
+            bvid="BV_EVIDENCE", title="探店", up_mid="300", up_name="老饕", publish_date="1700000000",
+        )
+
+        verified = await runner._store_extraction(
+            video=video, extraction=extraction, city="", transcript=transcript,
+        )
+
+        assert verified == 1
+        reviews = [c.args[0] for c in runner.pg.insert_review.call_args_list]
+        assert reviews[0].quote_verified is True
+        assert reviews[0].timestamp_seconds == 95.5
+        assert reviews[0].timestamp == "01:35"
+        assert reviews[0].video_published_at == "2023-11-15"
+        assert reviews[1].quote_verified is False
+        assert reviews[1].timestamp_seconds is None
+
+        # 高德返回"北京市"，统一为"北京"；命令行没给城市时向量库也用这个城市
+        assert runner.pg.update_restaurant_geo.call_args.kwargs["city"] == "北京"
+        vector_rows = [c.args[0][0] for c in runner.vector.insert.call_args_list]
+        assert {row["city"] for row in vector_rows} == {"北京"}

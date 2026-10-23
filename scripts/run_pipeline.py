@@ -106,7 +106,8 @@ async def _show_status(up_mid: int, limit: int) -> None:
                 click.echo(
                     f"  {icon:<10} [{t['bvid']}] {t['title'][:32]:<32} "
                     f"| 阶段: {t['stage']:<10} | 重试: {t['retry_count']} | "
-                    f"餐厅: {t['restaurant_count']} | 菜品: {t['dish_count']}{err_info}"
+                    f"餐厅: {t['restaurant_count']} | 菜品: {t['dish_count']} | "
+                    f"原话可核对: {t.get('verified_quote_count') or 0}{err_info}"
                 )
 
         click.echo("=" * 80)
@@ -165,7 +166,8 @@ async def _run(
             extra = f" (错误: {task.error_message})" if task.error_message else ""
             click.echo(
                 f"  {icon:<10} [{task.bvid}] {task.title[:30]:<30}"
-                f" -> {rest_count} restaurants, {dish_count} dishes{extra}"
+                f" -> {rest_count} restaurants, {dish_count} dishes, "
+                f"{task.verified_quote_count} verified quotes{extra}"
             )
 
         click.echo("=" * 70)
