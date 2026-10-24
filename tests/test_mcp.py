@@ -16,6 +16,7 @@ from src.mcp_server.server import (
     _generate_itinerary,
     _get_restaurant_review,
     _get_up_taste_profile,
+    _report_dining_outcome,
     _search_dish,
     call_tool,
     list_tools,
@@ -52,8 +53,8 @@ def _review(
 
 
 @pytest.mark.asyncio
-async def test_list_tools_contains_all_five_tools() -> None:
-    """测试 list_tools 正确注册 5 个核心工具，并在描述里写明引用规范"""
+async def test_list_tools_registers_six_tools() -> None:
+    """5 个查询工具 + 1 个反馈回写工具；描述里写明引用规范与写入行为"""
     tools = await list_tools()
     tool_names = [t.name for t in tools]
 
@@ -62,10 +63,15 @@ async def test_list_tools_contains_all_five_tools() -> None:
     assert "compare_restaurants" in tool_names
     assert "get_up_taste_profile" in tool_names
     assert "generate_food_tour_itinerary" in tool_names
-    assert len(tools) == 5
+    assert "report_dining_outcome" in tool_names
+    assert len(tools) == 6
 
     search_tool = next(t for t in tools if t.name == "search_dish_by_semantic_review")
     assert "quote_verified" in search_tool.description
+    report_tool = next(t for t in tools if t.name == "report_dining_outcome")
+    assert "写入数据" in report_tool.description
+    outcome_schema = report_tool.inputSchema["properties"]["outcome"]
+    assert outcome_schema["enum"] == ["liked", "neutral", "disliked"]
 
 
 @pytest.mark.asyncio
@@ -238,9 +244,18 @@ async def test_get_up_taste_profile() -> None:
          "video_bvid": "BV1b", "created_at": "2025-02-01", "quote_verified": True, "timestamp_seconds": 75.0},
     ]
 
+    feedback_rows = [
+        {"report_id": "m1", "up_master_id": "up-001", "up_name": "示例UP主", "cuisine": "淮扬菜",
+         "up_verdict": "推荐", "diner_verdict": "推荐"},
+        {"report_id": "m2", "up_master_id": "up-001", "up_name": "示例UP主", "cuisine": "川菜",
+         "up_verdict": "踩雷", "diner_verdict": "一般"},
+    ]
+
     with patch("src.mcp_server.server.pg.find_up_master_by_name", new_callable=AsyncMock, return_value=mock_up), \
          patch("src.mcp_server.server.pg.get_reviews_by_up_master", new_callable=AsyncMock,
                return_value=mock_reviews), \
+         patch("src.mcp_server.server.pg.get_feedback_rows", new_callable=AsyncMock,
+               return_value=feedback_rows), \
          patch("src.mcp_server.server.neo4j_store.get_up_master_graph", new_callable=AsyncMock) as mock_graph:
 
         mock_graph.return_value = {"evaluations": mock_reviews}
@@ -248,7 +263,11 @@ async def test_get_up_taste_profile() -> None:
         result = await _get_up_taste_profile({"up_name": "示例UP主"})
 
     assert result["up_master"]["name"] == "示例UP主"
-    assert result["up_master"]["credibility"] == "未计算（第②层来源可信仍在设计中）"
+    assert result["up_master"]["credibility"].startswith("未计算")
+    # 餐后反馈：2 条里 1 条与 UP 主说法一致；少于 5 条时提示仅供参考
+    assert result["diner_feedback"]["reports"] == 2
+    assert result["diner_feedback"]["agreement_rate"] == "50.0%"
+    assert "仅供参考" in result["diner_feedback"]["note"]
     assert "credibility_score" not in result["up_master"]
     assert result["overview"]["total_reviews"] == 3
     assert result["overview"]["visited_cities"] == ["北京", "淮安"]
@@ -266,6 +285,7 @@ async def test_get_up_taste_profile() -> None:
     assert [d["dish"] for d in top] == ["软兜长鱼", "平桥豆腐"]  # 已核验的原话排在前面
     avoided = result["hall_of_fame"]["avoided_dishes"]
     assert avoided[0]["dish"] == "麻辣牛蛙"
+    assert "review_id" in avoided[0]  # Agent 可以拿它回写餐后反馈
     assert avoided[0]["video_url"] == "https://www.bilibili.com/video/BV1b?t=75"
 
 
@@ -368,3 +388,117 @@ async def test_call_tool_dispatch() -> None:
         res = await call_tool("get_up_taste_profile", {"up_name": "示例UP主"})
         data = json.loads(res[0].text)
         assert data["status"] == "ok_profile"
+
+
+def _claim(review_id: str, up: str, verdict: str, dish: str = "宝塔肉") -> dict:
+    """get_reviews_by_ids 的返回格式"""
+    return {
+        "id": review_id, "up_master_id": f"u-{up}", "up_name": up, "sentiment": verdict,
+        "dish_name": dish, "restaurant_name": "示例私房菜", "restaurant_city": "北京",
+        "restaurant_cuisine": "江浙菜", "raw_text": f"{dish}{verdict}", "video_bvid": "BV1example",
+    }
+
+
+@pytest.mark.asyncio
+async def test_report_outcome_attaches_feedback_to_each_claim() -> None:
+    """一顿饭验证两位 UP 主的说法：各记一行、共享 report_id，并返回一致率"""
+    claims = [_claim("rv-1", "老饕甲", "推荐"), _claim("rv-2", "老饕乙", "一般")]
+    feedback_rows = [
+        {"report_id": "r", "up_master_id": "u-老饕甲", "up_name": "老饕甲", "cuisine": "江浙菜",
+         "up_verdict": "推荐", "diner_verdict": "踩雷"},
+    ]
+    with patch("src.mcp_server.server.pg.get_reviews_by_ids", new_callable=AsyncMock,
+               return_value=claims) as mock_lookup, \
+         patch("src.mcp_server.server.pg.insert_dining_outcomes",
+               new_callable=AsyncMock) as mock_insert, \
+         patch("src.mcp_server.server.pg.get_feedback_rows", new_callable=AsyncMock,
+               return_value=feedback_rows) as mock_feedback:
+        result = await _report_dining_outcome({
+            "outcome": "disliked",
+            "review_ids": ["rv-1", "rv-2", "rv-1", "rv-unknown"],
+            "note": "太甜了",
+        })
+
+    assert mock_lookup.call_args.args[0] == ["rv-1", "rv-2", "rv-unknown"]  # 去重
+    outcomes = mock_insert.call_args.args[0]
+    assert [o.review_id for o in outcomes] == ["rv-1", "rv-2"]
+    assert len({o.report_id for o in outcomes}) == 1
+    assert {o.diner_verdict.value for o in outcomes} == {"踩雷"}
+    assert outcomes[0].note == "太甜了"
+
+    assert result["recorded"] == 2
+    assert [c["agree"] for c in result["claims"]] == [False, False]
+    assert result["unknown_review_ids"] == ["rv-unknown"]
+    assert mock_feedback.call_args.args[0] == ["u-老饕乙", "u-老饕甲"]
+    assert result["up_feedback"][0]["up"] == "老饕甲"
+
+
+@pytest.mark.asyncio
+async def test_report_outcome_by_dish_name_uses_latest_claim_per_up() -> None:
+    """没有 review_id 时按餐厅与菜名找说法：每位 UP 主取最近一条"""
+    rest = {"id": "r1", "name": "示例私房菜", "city": "北京"}
+    rows = [
+        _review("宝塔肉", "老饕甲", "推荐", rid="rv-old", created="2025-01-01"),
+        _review("宝塔肉", "老饕甲", "推荐", rid="rv-new", created="2025-06-01"),
+        _review("宝塔肉", "老饕乙", "一般", rid="rv-b"),
+        _review("锅贴鱼片", "老饕乙", "推荐", rid="rv-other"),
+    ]
+    claims = [_claim("rv-new", "老饕甲", "推荐"), _claim("rv-b", "老饕乙", "一般")]
+    with patch("src.mcp_server.server.pg.find_restaurant_by_name", new_callable=AsyncMock,
+               return_value=rest), \
+         patch("src.mcp_server.server.pg.get_reviews_for_restaurant", new_callable=AsyncMock,
+               return_value=rows), \
+         patch("src.mcp_server.server.pg.get_reviews_by_ids", new_callable=AsyncMock,
+               return_value=claims) as mock_lookup, \
+         patch("src.mcp_server.server.pg.insert_dining_outcomes", new_callable=AsyncMock), \
+         patch("src.mcp_server.server.pg.get_feedback_rows", new_callable=AsyncMock,
+               return_value=[]):
+        result = await _report_dining_outcome({
+            "outcome": "liked", "restaurant_name": "示例私房菜", "dish_name": "宝塔肉",
+        })
+
+    assert sorted(mock_lookup.call_args.args[0]) == ["rv-b", "rv-new"]
+    assert result["recorded"] == 2
+    assert {c["up"]: c["agree"] for c in result["claims"]} == {"老饕甲": True, "老饕乙": False}
+
+
+@pytest.mark.asyncio
+async def test_report_outcome_rejects_bad_input() -> None:
+    """非法感受、缺少定位信息、review_id 全部未知时都不写入"""
+    with patch("src.mcp_server.server.pg.insert_dining_outcomes",
+               new_callable=AsyncMock) as mock_insert, \
+         patch("src.mcp_server.server.pg.get_reviews_by_ids", new_callable=AsyncMock,
+               return_value=[]):
+        bad_outcome = await _report_dining_outcome({"outcome": "great", "review_ids": ["rv-1"]})
+        missing = await _report_dining_outcome({"outcome": "liked"})
+        unknown = await _report_dining_outcome({"outcome": "liked", "review_ids": ["rv-x"]})
+
+    assert "outcome" in bad_outcome["error"]
+    assert "review_ids" in missing["error"]
+    assert unknown["unknown_review_ids"] == ["rv-x"]
+    assert not mock_insert.called
+
+
+@pytest.mark.asyncio
+async def test_restaurant_review_shows_diner_feedback() -> None:
+    """证据条目附带它收到的餐后反馈分布"""
+    rest = {"id": "r1", "name": "示例私房菜", "city": "北京", "cuisine_type": "江浙菜"}
+    reviews = [
+        _review("宝塔肉", "老饕甲", "推荐", rid="rv-1"),
+        _review("锅贴鱼片", "老饕甲", "推荐", rid="rv-2"),
+    ]
+    outcomes = [
+        {"review_id": "rv-1", "diner_verdict": "推荐"},
+        {"review_id": "rv-1", "diner_verdict": "踩雷"},
+    ]
+    with patch("src.mcp_server.server.pg.find_restaurant_by_name", new_callable=AsyncMock,
+               return_value=rest), \
+         patch("src.mcp_server.server.pg.get_reviews_for_restaurant", new_callable=AsyncMock,
+               return_value=reviews), \
+         patch("src.mcp_server.server.pg.get_outcomes_for_reviews", new_callable=AsyncMock,
+               return_value=outcomes):
+        result = await _get_restaurant_review({"restaurant_name": "示例私房菜"})
+
+    evidence = {d["dish"]: d["evidence"][0] for d in result["dishes"]}
+    assert evidence["宝塔肉"]["diner_feedback"] == {"liked": 1, "neutral": 0, "disliked": 1}
+    assert "diner_feedback" not in evidence["锅贴鱼片"]

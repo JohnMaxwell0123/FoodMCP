@@ -1,15 +1,16 @@
 """
 MCP Server 入口
 
-提供五个核心 Tool:
+提供六个 Tool:
   1. search_dish_by_semantic_review — 按口味描述检索菜品，附 UP 主原话证据
   2. get_restaurant_detailed_review — 餐厅的菜品级证据分布（按 UP 主计票）
   3. compare_restaurants — 餐厅横向对比（优先比较共同评价者）
-  4. get_up_taste_profile — UP 主的城市足迹、菜系与判定分布
+  4. get_up_taste_profile — UP 主的城市足迹、菜系、判定分布与食客反馈一致率
   5. generate_food_tour_itinerary — 只使用证据数据的行程规划
+  6. report_dining_outcome — Agent 代收餐后反馈，挂在具体的 UP 主说法上（唯一的写入工具）
 
-所有返回值都带出处：哪位 UP 主、哪个视频（链接带时间点）、原话是否已在字幕中核验。
-FoodMCP 不输出平均分，只输出证据的分布。
+所有返回值都带出处：哪位 UP 主、哪个视频（链接带时间点）、原话是否已在字幕中核验，
+以及可用于回写餐后反馈的 review_id。FoodMCP 不输出平均分，只输出证据的分布。
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 from typing import Any
 
 from loguru import logger
@@ -25,10 +27,16 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from src.evidence.consensus import VERDICTS, classify_dish, summarize_dishes
+from src.evidence.feedback import (
+    OUTCOME_TO_VERDICT,
+    diner_feedback_counts,
+    summarize_up_feedback,
+)
 from src.evidence.quotes import format_timestamp, normalize, video_url
 from src.extractor.llm_client import LLMClient
 from src.extractor.prompts import PromptBuilder
 from src.geocode.amap_client import normalize_city
+from src.models.entities import DiningOutcome, Sentiment
 from src.storage.pg_store import PostgresStore
 from src.storage.neo4j_store import Neo4jStore
 from src.storage.vector_store import VectorStore
@@ -45,7 +53,7 @@ llm = LLMClient()
 # 两家餐厅各自至少有这么多条菜品判定，对比工具才给出孰优孰劣的结论
 MIN_VERDICTS_FOR_COMPARISON = 3
 
-CREDIBILITY_NOT_COMPUTED = "未计算（第②层来源可信仍在设计中）"
+CREDIBILITY_NOT_COMPUTED = "未计算（第②层来源可信仍在设计中；食客反馈一致率见 diner_feedback）"
 
 # 写进 Tool 描述的引用规范：在 Agent 形态里，Tool 描述和返回结构就是产品界面
 CITATION_RULE = (
@@ -157,6 +165,49 @@ async def list_tools() -> list[Tool]:
                 "required": ["city"],
             },
         ),
+        Tool(
+            name="report_dining_outcome",
+            description=(
+                "记录用户吃完之后的真实感受，挂在之前展示给用户的那几条UP主评价上，"
+                "用来检验UP主说得准不准。在用户提到'上次那家/那道菜怎么样'时调用。"
+                "review_ids 取自其他工具返回的 review_id；"
+                "没有时可以给 restaurant_name + dish_name。"
+                "只记录用户明确表达的感受，不要替用户推测；note 里不要写入用户的个人信息。"
+                "这是唯一会写入数据的工具。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["liked", "neutral", "disliked"],
+                        "description": (
+                            "用户的感受：liked=好吃/会再点，neutral=一般，disliked=踩雷/不会再点"
+                        ),
+                    },
+                    "review_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "被验证的UP主评价ID（来自其他工具返回的 review_id）",
+                    },
+                    "restaurant_name": {
+                        "type": "string", "description": "没有 review_id 时：餐厅名称",
+                    },
+                    "dish_name": {"type": "string", "description": "没有 review_id 时：菜品名称"},
+                    "city": {
+                        "type": "string", "description": "所在城市（用于消歧义）", "default": "",
+                    },
+                    "note": {"type": "string", "description": "用户的原话（可选，不含个人信息）"},
+                    "reporter_id": {
+                        "type": "string",
+                        "description": (
+                            "可选的匿名标识；同一标识对同一条评价的重复反馈只保留最新一次"
+                        ),
+                    },
+                },
+                "required": ["outcome"],
+            },
+        ),
     ]
 
 
@@ -174,6 +225,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = await _get_up_taste_profile(arguments)
         elif name == "generate_food_tour_itinerary":
             result = await _generate_itinerary(arguments)
+        elif name == "report_dining_outcome":
+            result = await _report_dining_outcome(arguments)
         else:
             result = {"error": f"未知工具: {name}"}
     except Exception as e:
@@ -217,7 +270,24 @@ def _brief(summary: dict[str, Any]) -> dict[str, Any]:
         "verdict_counts": summary["verdict_counts"],
         "evidence_level": summary["evidence_level"],
         "ups": [e["up"] for e in summary["evidence"]],
+        "review_ids": [e["review_id"] for e in summary["evidence"]],
     }
+
+
+async def _attach_diner_feedback(items: list[dict[str, Any]]) -> None:
+    """给带 review_id 的证据条目附上它收到的餐后反馈分布（没有反馈的条目不加字段）"""
+    review_ids = [item["review_id"] for item in items if item.get("review_id")]
+    if not review_ids:
+        return
+    try:
+        counts = diner_feedback_counts(await pg.get_outcomes_for_reviews(review_ids))
+    except Exception as e:
+        logger.warning(f"读取餐后反馈失败: {e}")
+        return
+    for item in items:
+        feedback = counts.get(item.get("review_id", ""))
+        if feedback:
+            item["diner_feedback"] = feedback
 
 
 def _verdict_stats(
@@ -297,6 +367,7 @@ async def _search_dish(args: dict) -> dict:
         if len(results) >= top_k:
             break
 
+    await _attach_diner_feedback(results)
     return {
         "query": query,
         "city": city,
@@ -317,6 +388,7 @@ async def _get_restaurant_review(args: dict) -> dict:
 
     reviews = await pg.get_reviews_for_restaurant(rest["id"])
     dishes = summarize_dishes(reviews)
+    await _attach_diner_feedback([e for d in dishes for e in d["evidence"]])
 
     return {
         "restaurant": rest["name"],
@@ -505,6 +577,7 @@ async def _get_up_taste_profile(args: dict) -> dict:
             "restaurant": r["restaurant_name"],
             "city": r["restaurant_city"],
             "quote": r["raw_text"],
+            "review_id": r.get("id", ""),
             **_source_fields(r),
         }
 
@@ -512,6 +585,15 @@ async def _get_up_taste_profile(args: dict) -> dict:
     by_verified = sorted(reviews, key=lambda r: not r.get("quote_verified"))
     top_recommended = [_quote_item(r) for r in by_verified if r["sentiment"] == "推荐"][:8]
     avoided_dishes = [_quote_item(r) for r in by_verified if r["sentiment"] == "踩雷"][:8]
+
+    # 食客吃完之后的反馈与这位 UP 主说法的一致率（第③层反向校准第②层的原始材料）
+    diner_feedback: dict[str, Any] = {"reports": 0, "note": "还没有餐后反馈"}
+    try:
+        feedback = summarize_up_feedback(await pg.get_feedback_rows([up["id"]]))
+        if feedback:
+            diner_feedback = {k: v for k, v in feedback[0].items() if k != "up"}
+    except Exception as e:
+        logger.warning(f"读取餐后反馈失败: {e}")
 
     graph_extra = {}
     try:
@@ -543,9 +625,12 @@ async def _get_up_taste_profile(args: dict) -> dict:
                 "avoid_rate": f"{avoid_rate}%",
             },
         },
+        "diner_feedback": diner_feedback,
         "how_to_read": (
             "selectivity 只描述这位UP主给出踩雷的频率（表达风格），不代表可信度。"
             "推荐率越高，单条'推荐'的区分度越低，可作为解读其评价的基线。"
+            "diner_feedback 是食客吃完后的感受与这位UP主说法的一致率，按菜系拆分；"
+            "反馈少时仅供参考。"
         ),
         "hall_of_fame": {
             "top_recommended_dishes": top_recommended,
@@ -575,6 +660,7 @@ def _evidence_refs(summaries: list[dict[str, Any]], verdict: str) -> list[dict[s
             "dish": s["dish"],
             "ups": [e["up"] for e in s["evidence"] if e["verdict"] == verdict],
             "video_urls": [e["video_url"] for e in s["evidence"] if e["verdict"] == verdict],
+            "review_ids": [e["review_id"] for e in s["evidence"] if e["verdict"] == verdict],
         }
         for s in summaries
     ]
@@ -728,6 +814,85 @@ async def _generate_itinerary(args: dict) -> dict:
     return plan
 
 
+async def _claims_for_dish(name: str, dish: str, city: str) -> tuple[list[str], str | None]:
+    """没有 review_id 时，按餐厅与菜名找到每位 UP 主对这道菜最近的一条说法"""
+    rest = await pg.find_restaurant_by_name(name, city)
+    if not rest:
+        return [], f"未找到餐厅: {name}"
+
+    rows = await pg.get_reviews_for_restaurant(rest["id"])
+    dish = dish.strip()
+    matched = [r for r in rows if r.get("dish_name") == dish] or [
+        r for r in rows
+        if dish and r.get("dish_name") and (dish in r["dish_name"] or r["dish_name"] in dish)
+    ]
+    if not matched:
+        return [], f"餐厅 {rest['name']} 没有关于「{dish}」的UP主评价"
+    return [e["review_id"] for s in summarize_dishes(matched) for e in s["evidence"]], None
+
+
+async def _report_dining_outcome(args: dict) -> dict:
+    """
+    记录一次餐后反馈，挂在被验证的 UP 主说法上
+
+    一顿饭可能同时验证多位 UP 主的说法：每条说法各记一行，共享同一个 report_id，
+    这样既能按 UP 主算一致率，又能按"一顿饭"算北极星。
+    """
+    outcome = args.get("outcome", "")
+    if outcome not in OUTCOME_TO_VERDICT:
+        return {"error": f"outcome 必须是 {', '.join(OUTCOME_TO_VERDICT)} 之一"}
+    diner_verdict = Sentiment(OUTCOME_TO_VERDICT[outcome])
+
+    review_ids = list(dict.fromkeys(rid for rid in args.get("review_ids") or [] if rid))
+    if not review_ids:
+        name, dish = args.get("restaurant_name", ""), args.get("dish_name", "")
+        if not (name and dish):
+            return {"error": "需要 review_ids，或 restaurant_name + dish_name"}
+        review_ids, error = await _claims_for_dish(name, dish, normalize_city(args.get("city", "")))
+        if error:
+            return {"error": error}
+
+    found = {row["id"]: row for row in await pg.get_reviews_by_ids(review_ids)}
+    claims = [found[rid] for rid in review_ids if rid in found]
+    if not claims:
+        return {"error": "这些 review_id 都不在知识库中", "unknown_review_ids": review_ids}
+
+    report_id = str(uuid.uuid4())
+    await pg.insert_dining_outcomes([
+        DiningOutcome(
+            report_id=report_id,
+            review_id=claim["id"],
+            diner_verdict=diner_verdict,
+            note=str(args.get("note") or "").strip(),
+            reporter_id=str(args.get("reporter_id") or "").strip(),
+        )
+        for claim in claims
+    ])
+
+    up_ids = sorted({str(claim["up_master_id"]) for claim in claims})
+    result: dict[str, Any] = {
+        "recorded": len(claims),
+        "report_id": report_id,
+        "claims": [
+            {
+                "review_id": claim["id"],
+                "up": claim.get("up_name", ""),
+                "restaurant": claim.get("restaurant_name", ""),
+                "dish": claim.get("dish_name", ""),
+                "up_verdict": claim.get("sentiment", ""),
+                "diner_verdict": diner_verdict.value,
+                "agree": claim.get("sentiment") == diner_verdict.value,
+            }
+            for claim in claims
+        ],
+        "up_feedback": summarize_up_feedback(await pg.get_feedback_rows(up_ids)),
+    }
+    unknown = [rid for rid in review_ids if rid not in found]
+    if unknown:
+        result["unknown_review_ids"] = unknown
+    return result
+
+
 # ============================================================
 # 启动入口
 # ============================================================
@@ -738,6 +903,7 @@ async def startup() -> None:
     strict = os.getenv("MCP_STRICT_STORAGE", "false").lower() in ("true", "1", "yes")
     try:
         await pg.connect()
+        await pg.init_tables()  # 幂等；升级后先启动 MCP Server 时也会建好反馈表、补齐证据字段
         await neo4j_store.connect()
         vector.connect()
         vector.init_collection()

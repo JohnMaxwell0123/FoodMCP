@@ -607,6 +607,10 @@
     .delay-4 {
       animation-delay: .4s
     }
+
+    .delay-5 {
+      animation-delay: .5s
+    }
   </style>
 </head>
 
@@ -633,7 +637,7 @@
     <h1 class="animate delay-1">B站探店视频<br><span class="highlight">可核对的菜品级证据</span></h1>
     <p class="animate delay-2">把 UP 主的试吃评价细化到菜品颗粒度，并让每条结论都带着出处：哪位 UP 主、哪个视频的第几秒、原话怎么说。通过 MCP 交给 AI Agent。</p>
     <div style="margin-top:12px;font-size:0.9rem;color:var(--accent2);font-weight:600" class="animate delay-2">
-      🎯 已验证: 2 餐厅 · 11 菜品 · 原话回查字幕 · 5 个 MCP 工具 · 65 个单元测试
+      🎯 已验证: 2 餐厅 · 11 菜品 · 原话回查字幕 · 6 个 MCP 工具（含餐后反馈回写） · 76 个单元测试
     </div>
     <div class="cta animate delay-3">
       <a href="#tools" class="btn-primary">核心功能 ↓</a>
@@ -721,7 +725,7 @@
     <div class="container">
       <div class="section-label">MCP Skills</div>
       <div class="section-title">核心 MCP Tools 设计</div>
-      <div class="section-desc">标准化 MCP 接口，任何 AI Agent 都能调用；每个返回值都带出处，引用规范写在 Tool 描述里</div>
+      <div class="section-desc">标准化 MCP 接口，任何 AI Agent 都能调用；每个返回值都带出处，引用规范写在 Tool 描述里。5 个查询，1 个回写</div>
       <div class="tools-grid">
         <div class="tool-card animate">
           <div class="num">01</div>
@@ -771,6 +775,16 @@
           <div class="example">
             <strong>示例查询</strong>
             "北京两天一夜、以老字号为主的路线"
+          </div>
+        </div>
+        <div class="tool-card animate delay-5">
+          <div class="num">06</div>
+          <h3>餐后反馈回写</h3>
+          <div class="fname">report_dining_outcome</div>
+          <p>Agent 在下一次对话里代收用户吃完的感受，挂在具体的那条 UP 主说法上；累计成每位 UP 主按菜系拆分的一致率。唯一会写入数据的工具。</p>
+          <div class="example">
+            <strong>示例对话</strong>
+            "上次那家的鱼确实嫩，但藿香烧米翘不值"
           </div>
         </div>
       </div>
@@ -850,7 +864,7 @@
           <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">菜品详细提取</div>
         </div>
         <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center">
-          <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">65/65</div>
+          <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">76/76</div>
           <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">单元测试通过</div>
         </div>
       </div>
@@ -920,7 +934,7 @@
         <ul>
           <li>鸭觅回答"该信谁"：筛选并问责推荐官，结论压缩成几把金勺子。</li>
           <li>FoodMCP 回答"凭什么信"：不选人，把信任押在证据上，每条结论都能追到原视频的那一秒。</li>
-          <li>形态互换以后，两者断在同一个地方：数据层拿不到餐后反馈。所以下一步最优先的设计，是让 Agent 代收餐后反馈。</li>
+          <li>形态互换以后，两者断在同一个地方：数据层拿不到餐后反馈。所以 FoodMCP 加了回写工具 report_dining_outcome，让 Agent 代收餐后反馈；接下来缺的是真实使用。</li>
           <li>机制对照与形态互换的思想实验见 PORTFOLIO 第七章。</li>
         </ul>
       </div>
@@ -962,6 +976,7 @@
             <li>✅ 所有 MCP 返回值附出处</li>
             <li>✅ 按 UP 主计票替代平均分；负面结论要求原话已核验</li>
             <li>✅ 行程规划只取证据数据，越界内容自动删除</li>
+            <li>✅ 餐后反馈回写工具；可信度报告（可核对率、北极星、UP 主一致率）</li>
           </ul>
         </div>
         <div class="rm-item">
@@ -969,7 +984,7 @@
           <div class="period">计划中</div>
           <ul>
             <li>用真实字幕建立难例评测集，写定判定口径</li>
-            <li>Agent 代收餐后反馈，反向校准 UP 主在各菜系上的权重</li>
+            <li>积累真实餐后反馈，反向校准 UP 主在各菜系上的权重</li>
             <li>识别合作声明；菜系归一化；城市按餐厅推断</li>
             <li>与少量 UP 主达成授权</li>
           </ul>

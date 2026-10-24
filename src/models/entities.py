@@ -127,6 +127,18 @@ class Review(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+class DiningOutcome(BaseModel):
+    """餐后反馈：食客对某条 UP 主说法的验证（由 Agent 代收）"""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    report_id: str = Field(..., description="同一次反馈的分组ID：一顿饭可能对应多位UP主的说法")
+    review_id: str = Field(..., description="被验证的那条UP主评价")
+    diner_verdict: Sentiment = Field(..., description="食客吃完后的判定（推荐/一般/踩雷）")
+    note: str = Field(default="", description="食客原话（不含个人信息）")
+    reporter_id: str = Field(default="", description="可选的匿名反馈者标识，用于去重")
+    reported_at: datetime = Field(default_factory=datetime.now)
+
+
 # ============================================================
 # LLM 提取中间模型 — 对应 Prompt 输出格式
 # ============================================================

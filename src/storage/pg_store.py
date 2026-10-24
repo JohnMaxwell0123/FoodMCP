@@ -18,7 +18,7 @@ from psycopg.rows import dict_row
 from config.settings import settings
 from src.geocode.amap_client import normalize_city
 from src.models.entities import (
-    Dish, PipelineTask, Restaurant, Review, TaskStatus, UPMaster,
+    DiningOutcome, Dish, PipelineTask, Restaurant, Review, TaskStatus, UPMaster,
 )
 
 # 数据库初始化 DDL
@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS pipeline_tasks (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- 餐后反馈：食客对某条 UP 主说法的验证（由 Agent 代收）
+CREATE TABLE IF NOT EXISTS dining_outcomes (
+    id VARCHAR(36) PRIMARY KEY,
+    report_id VARCHAR(36) NOT NULL,
+    review_id VARCHAR(36) REFERENCES reviews(id),
+    diner_verdict VARCHAR(20) NOT NULL,
+    note TEXT DEFAULT '',
+    reporter_id VARCHAR(100) DEFAULT '',
+    reported_at TIMESTAMP DEFAULT NOW()
+);
+
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_restaurants_city ON restaurants(city);
 CREATE INDEX IF NOT EXISTS idx_restaurants_name ON restaurants(name);
@@ -109,6 +120,10 @@ CREATE INDEX IF NOT EXISTS idx_reviews_up_master ON reviews(up_master_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_sentiment ON reviews(sentiment);
 CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_up_mid ON pipeline_tasks(up_mid);
 CREATE INDEX IF NOT EXISTS idx_pipeline_tasks_status ON pipeline_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_dining_outcomes_review ON dining_outcomes(review_id);
+-- 同一匿名反馈者对同一条评价只保留最新一次反馈
+CREATE UNIQUE INDEX IF NOT EXISTS uq_dining_outcomes_reporter
+    ON dining_outcomes(review_id, reporter_id) WHERE reporter_id <> '';
 """
 
 
@@ -183,8 +198,10 @@ class PostgresStore:
                 """
                 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS timestamp_seconds DOUBLE PRECISION;
                 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS quote_verified BOOLEAN DEFAULT FALSE;
-                ALTER TABLE reviews ADD COLUMN IF NOT EXISTS video_published_at VARCHAR(20) DEFAULT '';
-                ALTER TABLE pipeline_tasks ADD COLUMN IF NOT EXISTS verified_quote_count INTEGER DEFAULT 0;
+                ALTER TABLE reviews
+                    ADD COLUMN IF NOT EXISTS video_published_at VARCHAR(20) DEFAULT '';
+                ALTER TABLE pipeline_tasks
+                    ADD COLUMN IF NOT EXISTS verified_quote_count INTEGER DEFAULT 0;
                 """
             )
         logger.info("PostgreSQL 数据表初始化完成")
@@ -448,8 +465,9 @@ class PostgresStore:
         sql = """
             SELECT r.id, r.raw_text, r.sentiment, r.video_bvid, r.timestamp,
                    r.timestamp_seconds, r.quote_verified, r.video_published_at,
-                   d.name AS dish_name, u.name AS up_name,
-                   rest.name AS restaurant_name, rest.city AS restaurant_city
+                   r.up_master_id, d.name AS dish_name, u.name AS up_name,
+                   rest.name AS restaurant_name, rest.city AS restaurant_city,
+                   rest.cuisine_type AS restaurant_cuisine
             FROM reviews r
             JOIN dishes d ON r.dish_id = d.id
             JOIN up_masters u ON r.up_master_id = u.id
@@ -534,6 +552,71 @@ class PostgresStore:
         """
         async with self._conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, (up_master_id,))
+            return await cur.fetchall()
+
+    async def get_verification_stats(self) -> dict:
+        """全部评价中原话已核验的数量，用于计算可核对率"""
+        sql = """
+            SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE quote_verified) AS verified
+            FROM reviews
+        """
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql)
+            return await cur.fetchone()
+
+    # =========================================================
+    # 餐后反馈
+    # =========================================================
+
+    async def insert_dining_outcomes(self, outcomes: list[DiningOutcome]) -> None:
+        """写入一次餐后反馈（可能对应多条 UP 主评价）；同一匿名反馈者对同一条评价只保留最新一次"""
+        if not outcomes:
+            return
+        sql = """
+            INSERT INTO dining_outcomes (id, report_id, review_id, diner_verdict, note, reporter_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (review_id, reporter_id) WHERE reporter_id <> '' DO UPDATE SET
+                report_id = EXCLUDED.report_id,
+                diner_verdict = EXCLUDED.diner_verdict,
+                note = EXCLUDED.note,
+                reported_at = NOW()
+        """
+        async with self._conn.cursor() as cur:
+            await cur.executemany(
+                sql,
+                [
+                    (o.id, o.report_id, o.review_id, o.diner_verdict.value, o.note, o.reporter_id)
+                    for o in outcomes
+                ],
+            )
+
+    async def get_outcomes_for_reviews(self, review_ids: list[str]) -> list[dict]:
+        """一批 UP 主评价收到的餐后反馈"""
+        if not review_ids:
+            return []
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT review_id, diner_verdict FROM dining_outcomes WHERE review_id = ANY(%s)",
+                (list(review_ids),),
+            )
+            return await cur.fetchall()
+
+    async def get_feedback_rows(self, up_master_ids: list[str] | None = None) -> list[dict]:
+        """餐后反馈与被验证的 UP 主说法联表，供计算一致率与北极星"""
+        sql = """
+            SELECT o.report_id, o.diner_verdict, r.sentiment AS up_verdict,
+                   r.up_master_id, u.name AS up_name, rest.cuisine_type AS cuisine
+            FROM dining_outcomes o
+            JOIN reviews r ON o.review_id = r.id
+            JOIN up_masters u ON r.up_master_id = u.id
+            JOIN restaurants rest ON r.restaurant_id = rest.id
+        """
+        params: tuple = ()
+        if up_master_ids:
+            sql += " WHERE r.up_master_id = ANY(%s)"
+            params = (list(up_master_ids),)
+        async with self._conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(sql, params)
             return await cur.fetchall()
 
     # =========================================================

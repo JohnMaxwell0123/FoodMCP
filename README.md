@@ -59,6 +59,7 @@
 | 📊 多 UP 主证据 | "这家店哪些菜被多位 UP 主点名？有没有人说别点？" | 按 UP 主计票，标出共识、争议、孤证；不输出平均分 |
 | 🚫 反向检索 | "去这家店吃，哪些菜 UP 主说别点？" | `sentiment_filter=avoid`；避雷结论要求原话能在字幕中找到 |
 | 🗺️ 美食动线规划 | "生成 3 天上海老字号打卡路线" | LLM 按高德坐标编排路线；必点、避雷与原话只取自证据数据 |
+| 🍽️ 吃完之后 | "上次那家的鱼确实不错" | Agent 代收餐后反馈，挂在 UP 主的那条说法上，累计成"谁在什么菜系上说得准" |
 
 ---
 
@@ -106,10 +107,11 @@ flowchart TD
         P --> U[compare_restaurants]
         P --> V[get_up_taste_profile]
         P --> S[generate_food_tour_itinerary]
+        P --> W[report_dining_outcome 餐后反馈回写]
     end
 
     subgraph ConsumerLayer [" 7. Agent 消费端 "]
-        Q & R & U & V & S <==>|JSON-RPC via stdio| T[Claude Desktop / Cursor / 自研 Agent]
+        Q & R & U & V & S & W <==>|JSON-RPC via stdio| T[Claude Desktop / Cursor / 自研 Agent]
     end
 ```
 
@@ -148,8 +150,9 @@ flowchart TD
 * **已知局限**：城市目前是一次运行的参数（`--city`），而 UP 主会跨城探店。在 `--city 北京` 下，"山居满陇"当初误配的那家平谷农家院得分 0.515，仍高于拒绝线 0.45。修复方向是按餐厅推断城市。
 
 ### 6. 🔌 MCP 协议落地
-* 基于 Anthropic 官方 `mcp-python` SDK，通过 `stdio` 暴露 5 个工具，可接入 Claude Desktop、Cursor 等支持 MCP 的客户端。
+* 基于 Anthropic 官方 `mcp-python` SDK，通过 `stdio` 暴露 6 个工具（5 个查询 + 1 个餐后反馈回写），可接入 Claude Desktop、Cursor 等支持 MCP 的客户端。
 * **Tool 描述就是产品界面**：引用规范直接写在 Tool 描述里。向用户转述时要注明哪位 UP 主、哪个视频；`quote_verified=false` 时只转述原话，不下结论。
+* **餐后反馈回写**：数据层看不到用户吃完之后满不满意，这是选择 MCP 的代价。`report_dining_outcome` 让 Agent 在下一次对话里代收反馈，挂在具体的那条 UP 主说法上（每条说法返回 `review_id`），一顿饭验证几位 UP 主就记几行，共享一个 `report_id`。由此可以算出北极星（照推荐去吃没有踩雷的比例，按顿计）和每位 UP 主按菜系拆分的一致率（`src/evidence/feedback.py`）。目前只有通道，还没有真实反馈数据；本地 stdio 部署下也没有鉴权。
 
 ### 工程备注：B 站接口
 B 站接口对非浏览器请求会返回 412。`bilibili-api-python` 在安装 `curl-cffi` 后会自动使用浏览器 TLS 指纹的客户端。采集只读取公开视频的字幕与元数据，请求间隔 ≥ 2s；采集的数据只用于本地研究，不随仓库分发。
@@ -167,7 +170,7 @@ B 站接口对非浏览器请求会返回 412。`bilibili-api-python` 在安装 
 | **端到端处理** | 2 个视频 |
 | **入库餐厅** | 2 家（8.4 优雅河鲜、山居满陇） |
 | **提取精细化菜品** | 11 道（含五维度细节与 UP 主原话） |
-| **单元测试** | 65 / 65 全部通过（基于 mock，集成测试尚未编写） |
+| **单元测试** | 76 / 76 全部通过（基于 mock，集成测试尚未编写） |
 
 ### 5.1 真实运行产物（节选）
 
@@ -271,6 +274,13 @@ python -m scripts.backfill_evidence              # 回填核验结果与视频�
 python -m scripts.backfill_evidence --with-dates # 同时调用 B 站接口补全视频发布日期
 ```
 
+### 6.7 查看可信度报告（可选）
+
+```bash
+python -m scripts.trust_report
+```
+输出三个数：**可核对率**（原话能在字幕中找到的评价占比，领先指标）、**北极星**（照推荐去吃没有踩雷的比例，需要餐后反馈）、每位 UP 主说法与食客反馈的一致率（按菜系拆分，反馈少于 5 条时标"仅供参考"）。
+
 ---
 
 ## 🤖 七、Claude Desktop / Cursor 接入指南
@@ -298,8 +308,9 @@ python -m scripts.backfill_evidence --with-dates # 同时调用 B 站接口补�
 1. `search_dish_by_semantic_review`：输入口语化的口味需求，返回语义最相近的菜品与 UP 主原话。每条结果附 UP 主、视频链接（带时间点）、发布日期和 `quote_verified`；`sentiment_filter=avoid` 只查 UP 主说别点的菜。
 2. `get_restaurant_detailed_review`：餐厅的菜品级证据分布。按 UP 主计票，标注孤证、共识、争议，不输出平均分。
 3. `compare_restaurants`：横向对比两家餐厅的推荐率、踩雷率、推荐菜、避雷菜与争议菜。优先比较两家都去过的 UP 主，样本不足时不下结论。
-4. `get_up_taste_profile`：UP 主的城市足迹、常探菜系、判定分布与代表性原话。`selectivity` 只描述给出踩雷的频率，不代表可信度（可信度尚未计算）。
+4. `get_up_taste_profile`：UP 主的城市足迹、常探菜系、判定分布与代表性原话。`selectivity` 只描述给出踩雷的频率，不代表可信度（可信度尚未计算）；`diner_feedback` 是食客反馈与这位 UP 主说法的一致率，按菜系拆分。
 5. `generate_food_tour_itinerary`：指定城市与天数，按高德坐标编排路线。只安排有推荐证据的餐厅；必点、避雷与原话只取自证据数据，越界内容会被自动删除。
+6. `report_dining_outcome`：记录用户吃完之后的感受（liked / neutral / disliked），挂在之前展示过的 UP 主评价上（`review_ids`，或餐厅名 + 菜名）。返回每条说法与食客判断是否一致，以及这些 UP 主当前的一致率。这是唯一会写入数据的工具。
 
 ---
 
@@ -314,7 +325,7 @@ foodrecomandation/
 │   ├── collector/           # B站采集 (视频列表 + 探店筛选 + 字幕下载)
 │   ├── transcriber/         # Whisper 语音转录 (本地 ASR 兜底，尚未接入流水线)
 │   ├── extractor/           # LLM 结构化信息抽取 (Prompt + 校验器)
-│   ├── evidence/            # 证据层 (原话核验、视频时间点、按 UP 主计票)
+│   ├── evidence/            # 证据层 (原话核验、视频时间点、按 UP 主计票、餐后反馈汇总)
 │   ├── eval/                # LLM 抽取评测 (实体 F1 / 情感混淆矩阵 / 原话保真度)
 │   ├── geocode/             # 高德地图 POI 检索与地理编码
 │   ├── storage/             # 异构存储层 (PostgreSQL + Neo4j + Milvus)
@@ -324,6 +335,7 @@ foodrecomandation/
 │   ├── run_pipeline.py      # CLI 执行入口
 │   ├── run_eval.py          # 基于 data/eval 黄金集的抽取评测 CLI (支持 --mock 离线模式)
 │   ├── backfill_evidence.py # 为已有评价回填原话核验结果与视频时间点
+│   ├── trust_report.py      # 可信度报告：可核对率、北极星、UP 主一致率
 │   └── demo_bilibili.py     # 连通性测试脚本
 ├── tests/                   # 核心模块自动化单元测试
 ├── docker-compose.yml       # 一键三库编排文件
