@@ -17,6 +17,14 @@ from rapidfuzz import fuzz
 from config.settings import settings
 
 
+def normalize_city(city: str) -> str:
+    """统一城市写法：高德返回"北京市"，命令行与用户通常写"北京"，统一为不带"市"的形式"""
+    city = (city or "").strip()
+    if len(city) > 2 and city.endswith("市"):
+        return city[:-1]
+    return city
+
+
 @dataclass
 class GeoResult:
     """地理编码/POI搜索结果"""

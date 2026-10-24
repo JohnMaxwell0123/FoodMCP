@@ -5,7 +5,7 @@ FoodMCP LLM 抽取基准评测 CLI 入口
   # 真实 API 评测 (调用当前配置的 LLM 模型如 deepseek-chat)
   python -m scripts.run_eval
 
-  # 离线 Mock 验证模式 (用于 CI / 本地无 API 快速检验评测器逻辑)
+  # 离线 Mock 验证模式 (用于 CI / 本地无 API 检验评测流程；预测即金标准，指标恒为满分)
   python -m scripts.run_eval --mock
 
   # 指定模型与自定义数据集
@@ -45,7 +45,7 @@ console = Console(highlight=False)
 
 
 def _generate_mock_prediction(sample: dict) -> ExtractionResult:
-    """为 Mock 模式生成逼真的仿真抽取结果 (微小扰动以验证指标敏感度)"""
+    """Mock 模式：直接复用金标准作为预测，只用于验证评测流程能跑通（指标恒为满分，不代表模型效果）"""
     gt = sample.get("ground_truth", {})
     restaurants = []
 

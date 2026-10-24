@@ -278,7 +278,7 @@
       <div class="over">Bilibili Food-Review Video Intelligence</div>
       <h1>让 AI Agent<br>像<span>资深吃货</span>一样<br>推荐餐厅。</h1>
       <p class="under">
-        首个基于 LLM + MCP 协议的「视频级」餐饮点评语义聚合与检索服务。
+        基于 LLM + MCP 协议的「视频级」餐饮点评语义聚合与检索服务，每条结论都可以回到 UP 主原话与视频时间点。
         把 B站探店视频里 UP 主的真实评价，结构化到菜品颗粒度，
         通过标准 MCP 协议赋能所有 AI Agent。
       </p>
@@ -289,7 +289,7 @@
       <div><span class="lbl">文档类型</span><span class="val">产品设计与架构白皮书</span></div>
       <div><span class="lbl">项目周期</span><span class="val">2026.04 — 2026.05</span></div>
       <div><span class="lbl">项目性质</span><span class="val">独立完成 · 从 0 到 1</span></div>
-      <div><span class="lbl">当前状态</span><span class="val">MVP 全链路验证完成</span></div>
+      <div><span class="lbl">当前状态</span><span class="val">2026-07 版 · 可信模型与鸭觅对照见 PORTFOLIO.md</span></div>
     </div>
   </div>
 </div>
@@ -298,8 +298,8 @@
 <div class="page">
   <div class="inner">
     <div class="kicker">01 — Market Insight</div>
-    <div class="page-title">一个检索效率为零的<em>千亿级内容池</em></div>
-    <p class="page-sub">B站美食探店视频年增 40%+，但视频内容完全无法按「菜品维度」检索——这是现有平台集体缺席的地带。</p>
+    <div class="page-title">一个检索效率为零的<em>内容池</em></div>
+    <p class="page-sub">B站美食探店视频数量庞大，但视频内容完全无法按「菜品维度」检索——这是现有平台集体缺席的地带。</p>
 
     <table class="etable">
       <thead>
@@ -362,7 +362,7 @@
       </div>
       <div class="layer hot">
         <span class="ltag">Serve</span>
-        <span class="lbody"><b>MCP Server</b> — 5 个 Tool：语义搜索菜品 · 餐厅深度点评 · 餐厅横向对比 · UP 主口味画像 · 美食行程规划</span>
+        <span class="lbody"><b>MCP Server</b> — 6 个 Tool：语义搜索菜品 · 餐厅深度点评 · 餐厅横向对比 · UP 主口味画像 · 美食行程规划 · 餐后反馈回写</span>
       </div>
       <div class="layer">
         <span class="ltag">Store</span>
@@ -382,7 +382,7 @@
         <div>
           <h4>语义搜索菜品</h4>
           <div class="tname">search_dish_by_semantic_review</div>
-          <p>自然语言口味描述 → 向量语义匹配 → 菜品 + UP 主评价原文。支持城市、情感倾向、UP 主过滤。从「搜餐厅」到「搜口味」的范式升级。</p>
+          <p>自然语言口味描述 → 向量语义匹配 → 菜品 + UP 主评价原文。支持城市与情感倾向过滤，每条结果附 UP 主与视频出处。从「搜餐厅」到「搜口味」的范式升级。</p>
         </div>
       </div>
       <div class="tool">
@@ -405,7 +405,7 @@
 
     <div class="note" style="margin-top:22px;">
       <span class="ntag">关键决策 — 为什么是 MCP 而不是小程序 / REST API</span>
-      MCP 是 AI Agent 工具调用的标准协议，可类比「AI 世界的 USB 接口」。任何支持 MCP 的 Agent 都能<b>零开发成本</b>调用本服务。自建小程序意味着获客与维护的重投入；REST API 与 Agent 对接仍需适配。选择 MCP 是把产品边界主动划定在生态杠杆最大处。
+      MCP 是 AI Agent 工具调用的标准协议，可类比「AI 世界的 USB 接口」。任何支持 MCP 的 Agent 都能<b>零适配</b>调用本服务（数据仍需自行采集与授权）。自建小程序意味着获客与维护的重投入；REST API 与 Agent 对接仍需适配。选择 MCP 是把产品边界主动划定在生态杠杆最大处。
     </div>
   </div>
   <div class="folio"><span>FoodMCP · Portfolio</span><span>03</span></div>
@@ -512,7 +512,7 @@
       <div>
         <div class="note" style="margin-top:0;">
           <span class="ntag">质量体系的诚实切面</span>
-          真实抽取并非完美：一道菜名被抽取为「泰雕熟虾最池底」（实际应为花雕熟醉虾类菜品），属字幕 ASR 噪声传导；另有一例高德 POI 误匹配（山居满陇 → 异地同名农家院）。这两类问题已被数据质量流程标记——置信度评分 + 低分人工复核 + POI 置信度校验（Phase 2 修复项）。<b>展示缺陷，是因为质量体系能发现缺陷。</b>
+          真实抽取并非完美：一道菜名被抽取为「泰雕熟虾最池底」（实际应为花雕熟醉虾类菜品），属字幕 ASR 噪声传导；另有一例高德 POI 误匹配（山居满陇 → 异地同名农家院）。复盘（2026-10）：当时的置信度只衡量字段齐不齐，给这个乱码菜名也打了满分，也没有复核队列；现在改为原话回查字幕，对不上的标为未核验。POI 置信度门禁已上线，但根因（城市是运行级参数）仍在。<b>展示缺陷，是因为质量体系能发现缺陷。</b>
         </div>
       </div>
     </div>
@@ -535,7 +535,7 @@
         <tr><td class="lead">信息抽取</td><td>DeepSeek-Chat</td><td>成本约为 GPT-4o 的 1/10，中文口语理解强，适合批量处理字幕文本</td></tr>
         <tr><td class="lead">向量化</td><td>OpenAI text-embedding-3-small</td><td>中文语义检索效果稳定；独立 API Key 架构，Embedding 与 LLM 可独立替换</td></tr>
         <tr><td class="lead">Prompt 工程</td><td>3 套专用模板</td><td>角色具体化（「专业美食视频分析师」）+ JSON Schema 强约束 + 枚举限定 + 负样本显式要求（「不要遗漏任何踩雷信息」）</td></tr>
-        <tr><td class="lead">质量保障</td><td>置信度评分体系</td><td>Schema 校验 → 字段完整性检查 → 置信度打分 → 低分标记人工复核；verdict 自动规范化（「好吃推荐」→ 推荐）</td></tr>
+        <tr><td class="lead">质量保障</td><td>置信度评分体系</td><td>Schema 校验 → 判定白名单映射 → 原话回查字幕（对不上标为未核验）；置信度只衡量字段完整度</td></tr>
         <tr><td class="lead">数据架构</td><td>PG + Neo4j + Milvus</td><td>单库无法同时满足精确查询 + 关系分析 + 语义理解；以架构复杂度换取检索性能与灵活性</td></tr>
       </tbody>
     </table>
@@ -601,8 +601,8 @@
       <div>
         <h4>商业化探索 <span style="font-size:11px;color:var(--text3);font-weight:400;">预计 4–6 个月</span></h4>
         <ul>
-          <li>开放数据 API 按调用量计费；餐饮商家 UP 主舆情监控报告</li>
-          <li>个性化口味匹配模型；探索与点评/地图平台的数据合作</li>
+          <li>开放证据服务 API 按调用计费；不向餐饮商家收费（会让推荐失去中立）</li>
+          <li>基于用户餐后反馈的口味匹配；与 UP 主授权合作，引用回流到原视频</li>
         </ul>
       </div>
     </div>
@@ -624,10 +624,10 @@
       <div>
         <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;margin-bottom:12px;">护城河</div>
         <div style="font-size:12.5px;color:var(--text2);line-height:2.1;">
-          <span style="color:var(--text);font-weight:600;">技术壁垒</span> — 视频 → 结构化数据的转化能力<br>
-          <span style="color:var(--text);font-weight:600;">产品壁垒</span> — 菜品级语义检索<br>
-          <span style="color:var(--text);font-weight:600;">生态壁垒</span> — MCP 标准协议即插即用<br>
-          <span style="color:var(--text);font-weight:600;">时间壁垒</span> — 数据累积效应，越多越准
+          <span style="color:var(--text);font-weight:600;">不是壁垒</span> — 视频 → 结构化数据的转化能力（大模型抽取在快速普及）<br>
+          <span style="color:var(--text);font-weight:600;">证据链</span> — 每条结论都能回到 UP 主原话与视频时间点<br>
+          <span style="color:var(--text);font-weight:600;">分发杠杆</span> — MCP 标准协议（是杠杆，不是壁垒）<br>
+          <span style="color:var(--text);font-weight:600;">可信度数据</span> — 只能靠餐后反馈随时间积累
         </div>
       </div>
     </div>
@@ -647,13 +647,13 @@
         <tr><th style="width:20%">能力维度</th><th>本项目具体体现</th></tr>
       </thead>
       <tbody>
-        <tr><td class="lead">用户洞察</td><td>痛点四象限分级 · 用户画像分层 · JTBD 场景定义 · 竞品矩阵对比</td></tr>
+        <tr><td class="lead">用户洞察</td><td>痛点四象限分级 · 用户画像分层 · 竞品矩阵对比</td></tr>
         <tr><td class="lead">产品设计</td><td>完整 PRD（proposal.md）· 15+ Pydantic 数据模型 · MCP Tool Schema 设计 · 三库架构决策</td></tr>
         <tr><td class="lead">AI 技术判断力</td><td>Prompt Engineering 策略 · LLM / Embedding 模型选型与双 API 架构 · 置信度评分体系</td></tr>
         <tr><td class="lead">数据思维</td><td>全链路质量 Pipeline · 数据清洗与 verdict 规范化 · 来源可追溯设计 · 缺陷如实标注</td></tr>
         <tr><td class="lead">商业 Sense</td><td>商业画布 · GTM 策略（借力 MCP 生态）· 成本预估模型 · 护城河分析</td></tr>
         <tr><td class="lead">项目管理</td><td>MVP 优先验证核心假设 · 分阶段迭代 · 技术债务追踪 · 设计决策记录（PROGRESS.md）</td></tr>
-        <tr><td class="lead">技术动手能力</td><td>Python 全栈 · Docker 部署 · 风控对抗（412 突破）· 异步 Pipeline · 单元测试 39/39</td></tr>
+        <tr><td class="lead">技术动手能力</td><td>Python 全栈 · Docker 部署 · B 站 412 处理 · 异步 Pipeline · 单元测试 76/76</td></tr>
       </tbody>
     </table>
 
@@ -663,7 +663,7 @@
     <div class="tags">
       <span>Python 3.11</span><span>DeepSeek API</span><span>OpenAI Embedding</span>
       <span>MCP Python SDK</span><span>PostgreSQL 15</span><span>Neo4j 5</span>
-      <span>Milvus 2.4</span><span>Docker Compose</span><span>Whisper large-v3</span>
+      <span>Milvus 2.4</span><span>Docker Compose</span><span>Whisper（未接入）</span>
       <span>bilibili-api</span><span>curl-cffi</span><span>高德地图 API</span>
       <span>asyncio</span><span>pytest</span>
     </div>

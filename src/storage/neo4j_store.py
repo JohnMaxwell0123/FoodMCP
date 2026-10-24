@@ -81,10 +81,11 @@ class Neo4jStore:
                 avg_sentiment=dish.avg_sentiment, restaurant_id=restaurant_id)
 
     async def merge_up_master(self, up: UPMaster) -> None:
+        # 粉丝数与风格标签只在创建时写入，避免管线用默认值反复覆盖
         query = """
             MERGE (u:UPMaster {id: $id})
-            SET u.bilibili_uid=$bilibili_uid, u.name=$name,
-                u.follower_count=$follower_count, u.style_tags=$style_tags
+            ON CREATE SET u.follower_count=$follower_count, u.style_tags=$style_tags
+            SET u.bilibili_uid=$bilibili_uid, u.name=$name
         """
         async with self._driver.session() as session:
             await session.run(query, id=up.id, bilibili_uid=up.bilibili_uid,

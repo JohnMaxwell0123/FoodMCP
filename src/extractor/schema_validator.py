@@ -21,6 +21,16 @@ from src.models.entities import (
 # 合法的评价值
 VALID_VERDICTS = {"推荐", "一般", "踩雷"}
 
+# 非标准判定只按白名单整词映射，不做子串猜测：
+# 子串规则会把"不推荐""不好吃"判成推荐、把"不错"判成踩雷。
+# 白名单之外的值一律记为"一般"并保留原值待复核——宁可漏判，也不把差评说成推荐。
+VERDICT_SYNONYMS: dict[str, str] = {
+    "强烈推荐": "推荐", "好吃推荐": "推荐", "值得推荐": "推荐", "必点": "推荐", "必吃": "推荐",
+    "不推荐": "踩雷", "别点": "踩雷", "避雷": "踩雷", "雷": "踩雷", "差评": "踩雷",
+    "难吃": "踩雷", "不好吃": "踩雷", "太差了": "踩雷",
+    "还可以": "一般", "还行": "一般", "中规中矩": "一般", "一般般": "一般", "普通": "一般",
+}
+
 
 class SchemaValidator:
     """LLM 输出校验器"""
@@ -130,14 +140,11 @@ class SchemaValidator:
 
             # 规范化 verdict
             verdict = str(raw.get("verdict", "一般")).strip()
+            verdict_raw = ""
             if verdict not in VALID_VERDICTS:
-                # 尝试模糊匹配
-                if "推" in verdict or "好" in verdict or "赞" in verdict:
-                    verdict = "推荐"
-                elif "雷" in verdict or "差" in verdict or "不" in verdict:
-                    verdict = "踩雷"
-                else:
-                    verdict = "一般"
+                verdict_raw = verdict
+                verdict = VERDICT_SYNONYMS.get(verdict, "一般")
+                logger.warning(f"非标准判定 '{verdict_raw}' 已记为 '{verdict}'，待复核: {name}")
 
             # 处理 aspects
             raw_aspects = raw.get("aspects", {})
@@ -150,6 +157,7 @@ class SchemaValidator:
                 name=name,
                 price=str(raw.get("price", "")),
                 verdict=verdict,
+                verdict_raw=verdict_raw,
                 aspects=aspects,
                 original_quote=str(raw.get("original_quote", "")),
                 timestamp=str(raw.get("timestamp", "")),
@@ -160,12 +168,15 @@ class SchemaValidator:
 
     def _compute_confidence(self, restaurants: list[ExtractedRestaurant]) -> float:
         """
-        计算提取结果的置信度
+        计算提取结果的字段完整度（沿用 confidence 字段名）
+
+        它只衡量"字段齐不齐"，不衡量"内容对不对"：ASR 听错的菜名同样能拿满分。
+        内容是否可靠由入库时的原话核验（src/evidence/quotes.py）负责。
 
         评分维度：
           - 是否有餐厅记录
           - 餐厅信息完整度（名称、地址、菜系）
-          - 菜品信息完整度（名称、verdict、原话）
+          - 菜品信息完整度（名称、标准 verdict、原话）
           - 细分维度覆盖率
         """
         if not restaurants:
@@ -191,7 +202,7 @@ class SchemaValidator:
                 dish_scores = []
                 for dish in rest.dishes:
                     d_score = 0.4  # 有菜名即得
-                    if dish.verdict in VALID_VERDICTS:
+                    if not dish.verdict_raw:  # LLM 直接给出了标准判定
                         d_score += 0.2
                     if dish.original_quote:
                         d_score += 0.2

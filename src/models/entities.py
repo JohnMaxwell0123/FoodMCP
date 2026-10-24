@@ -92,7 +92,9 @@ class UPMaster(BaseModel):
     name: str = Field(..., description="UP主名称")
     follower_count: int = Field(default=0, description="粉丝数")
     style_tags: list[str] = Field(default_factory=list, description="风格标签")
-    credibility_score: float = Field(default=0.5, description="可信度评分 (0~1)")
+    credibility_score: float | None = Field(
+        default=None, description="可信度评分 (0~1)；第②层来源可信尚未实现，未计算时为空"
+    )
     created_at: datetime = Field(default_factory=datetime.now)
 
 
@@ -114,12 +116,27 @@ class Review(BaseModel):
     dish_id: str = Field(..., description="评价菜品ID")
     restaurant_id: str = Field(..., description="评价餐厅ID")
     video_bvid: str = Field(..., description="来源视频BV号")
-    timestamp: str = Field(default="", description="视频中的时间戳")
+    timestamp: str = Field(default="", description="原话在视频中的时间点 (mm:ss)，由原话回查字幕得到")
+    timestamp_seconds: float | None = Field(default=None, description="原话在视频中的秒数")
+    quote_verified: bool = Field(default=False, description="原话能否在字幕中找到")
+    video_published_at: str = Field(default="", description="视频发布日期 (YYYY-MM-DD)")
     raw_text: str = Field(..., description="UP主原话")
     sentiment: Sentiment = Field(..., description="评价倾向")
     sentiment_score: float = Field(default=0.0, description="情绪分值 (-1.0~1.0)")
     aspects: AspectReview = Field(default_factory=AspectReview, description="细分维度评价")
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class DiningOutcome(BaseModel):
+    """餐后反馈：食客对某条 UP 主说法的验证（由 Agent 代收）"""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    report_id: str = Field(..., description="同一次反馈的分组ID：一顿饭可能对应多位UP主的说法")
+    review_id: str = Field(..., description="被验证的那条UP主评价")
+    diner_verdict: Sentiment = Field(..., description="食客吃完后的判定（推荐/一般/踩雷）")
+    note: str = Field(default="", description="食客原话（不含个人信息）")
+    reporter_id: str = Field(default="", description="可选的匿名反馈者标识，用于去重")
+    reported_at: datetime = Field(default_factory=datetime.now)
 
 
 # ============================================================
@@ -133,9 +150,12 @@ class ExtractedDish(BaseModel):
     name: str = Field(..., description="菜品名称")
     price: str = Field(default="", description="价格（原始文本）")
     verdict: str = Field(..., description="推荐/一般/踩雷")
+    verdict_raw: str = Field(
+        default="", description="LLM 给出的非标准判定原值（已按白名单映射或记为一般，待复核）"
+    )
     aspects: dict[str, str] = Field(default_factory=dict, description="细分维度评价")
     original_quote: str = Field(default="", description="UP主原话")
-    timestamp: str = Field(default="", description="大致时间段")
+    timestamp: str = Field(default="", description="LLM 看不到时间轴，此字段不再使用；时间点由原话回查字幕得到")
 
 
 class ExtractedRestaurant(BaseModel):
@@ -228,6 +248,7 @@ class PipelineTask(BaseModel):
     transcript_source: str = Field(default="", description="字幕来源(cc/ai/whisper)")
     restaurant_count: int = Field(default=0, description="识别餐厅数")
     dish_count: int = Field(default=0, description="识别菜品数")
+    verified_quote_count: int = Field(default=0, description="原话能在字幕中找到的菜品数")
     updated_at: datetime | None = Field(default=None, description="更新时间")
     transcript: TranscriptResult | None = None
     extraction: ExtractionResult | None = None

@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>B站探店视频深度解析 — MCP 服务计划书</title>
+  <title>FoodMCP — 可核对的菜品级证据</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap"
     rel="stylesheet">
@@ -607,6 +607,10 @@
     .delay-4 {
       animation-delay: .4s
     }
+
+    .delay-5 {
+      animation-delay: .5s
+    }
   </style>
 </head>
 
@@ -621,6 +625,7 @@
       <a href="#pain">市场痛点</a>
       <a href="#tools">核心功能</a>
       <a href="#tech">技术方案</a>
+      <a href="#trust">可信设计</a>
       <a href="#roadmap">路线图</a>
       <a href="#business">商业模式</a>
     </div>
@@ -628,15 +633,15 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="badge animate">✅ MVP 验证完成 · 全链路打通</div>
-    <h1 class="animate delay-1">B站探店视频<br><span class="highlight">深度解析引擎</span></h1>
-    <p class="animate delay-2">首个"视频级"餐饮点评聚合与检索引擎 —— 将UP主的真实试吃体验细化到菜品颗粒度，让 AI Agent 像资深吃货一样推荐餐厅</p>
+    <div class="badge animate">✅ MVP 验证完成 · 证据链已落地</div>
+    <h1 class="animate delay-1">B站探店视频<br><span class="highlight">可核对的菜品级证据</span></h1>
+    <p class="animate delay-2">把 UP 主的试吃评价细化到菜品颗粒度，并让每条结论都带着出处：哪位 UP 主、哪个视频的第几秒、原话怎么说。通过 MCP 交给 AI Agent。</p>
     <div style="margin-top:12px;font-size:0.9rem;color:var(--accent2);font-weight:600" class="animate delay-2">
-      🎯 已验证: 2 餐厅 · 11 菜品 · 全维度评价提取 · 三库存储 · MCP 服务可用
+      🎯 已验证: 2 餐厅 · 11 菜品 · 原话回查字幕 · 6 个 MCP 工具（含餐后反馈回写） · 76 个单元测试
     </div>
     <div class="cta animate delay-3">
       <a href="#tools" class="btn-primary">核心功能 ↓</a>
-      <a href="#tech" class="btn-secondary">技术方案</a>
+      <a href="#trust" class="btn-secondary">可信设计</a>
     </div>
   </section>
 
@@ -690,7 +695,13 @@
             <td>评价来源</td>
             <td>匿名用户</td>
             <td>UP主推荐</td>
-            <td class="tag-yes">UP主原话+情绪分析</td>
+            <td class="tag-yes">UP主原话 + 视频时间点（可核对）</td>
+          </tr>
+          <tr>
+            <td>多人评价</td>
+            <td>平均分</td>
+            <td>各自独立的视频</td>
+            <td class="tag-yes">按 UP 主计票：共识 / 争议 / 孤证</td>
           </tr>
           <tr>
             <td>AI 集成</td>
@@ -702,7 +713,7 @@
             <td>负面信息</td>
             <td>部分展示</td>
             <td class="tag-no">通常不体现</td>
-            <td class="tag-yes">完整保留踩雷信息</td>
+            <td class="tag-yes">保留踩雷，且要求原话可核对</td>
           </tr>
         </tbody>
       </table>
@@ -714,13 +725,13 @@
     <div class="container">
       <div class="section-label">MCP Skills</div>
       <div class="section-title">核心 MCP Tools 设计</div>
-      <div class="section-desc">标准化 MCP 接口，让任何 AI Agent 都能调用的美食智能服务</div>
+      <div class="section-desc">标准化 MCP 接口，任何 AI Agent 都能调用；每个返回值都带出处，引用规范写在 Tool 描述里。5 个查询，1 个回写</div>
       <div class="tools-grid">
         <div class="tool-card animate">
           <div class="num">01</div>
           <h3>按评价语义搜菜品</h3>
           <div class="fname">search_dish_by_semantic_review</div>
-          <p>基于自然语言描述，在指定城市中搜索匹配的菜品及UP主评价原文。</p>
+          <p>按自然语言描述检索菜品，每条结果附 UP 主原话、视频链接（带时间点）与核验状态；可以只查 UP 主说别点的菜。</p>
           <div class="example">
             <strong>示例查询</strong>
             "北京，红烧肉要肥而不腻，有UP主认证过的"
@@ -728,22 +739,52 @@
         </div>
         <div class="tool-card animate delay-1">
           <div class="num">02</div>
-          <h3>获取餐厅深度点评</h3>
+          <h3>餐厅证据分布</h3>
           <div class="fname">get_restaurant_detailed_review</div>
-          <p>汇总所有探访过该店的UP主名单，及各道菜品的好评/差评统计清单。</p>
+          <p>每道菜按 UP 主计票，标注孤证、共识、争议，不输出平均分。</p>
           <div class="example">
             <strong>示例查询</strong>
-            "四季民福烤鸭店的所有UP主评价汇总"
+            "这家店哪些菜被多位 UP 主点名？有没有人说别点？"
           </div>
         </div>
         <div class="tool-card animate delay-2">
           <div class="num">03</div>
-          <h3>生成美食打卡路线</h3>
-          <div class="fname">generate_food_tour_itinerary</div>
-          <p>结合地理位置与UP主评价偏好，生成结构化的多日美食行程表。</p>
+          <h3>餐厅横向对比</h3>
+          <div class="fname">compare_restaurants</div>
+          <p>优先比较两家都去过的 UP 主（同一个人的标准更可比）；样本不足时不下结论。</p>
           <div class="example">
             <strong>示例查询</strong>
-            "跟着老饭骨口味走的北京两天一夜高性价比路线"
+            "这两家涮肉，哪家更稳？"
+          </div>
+        </div>
+        <div class="tool-card animate delay-3">
+          <div class="num">04</div>
+          <h3>UP 主口味画像</h3>
+          <div class="fname">get_up_taste_profile</div>
+          <p>城市足迹、常探菜系、判定分布与代表性原话；"选择性"只描述表达风格，不代表可信度。</p>
+          <div class="example">
+            <strong>示例查询</strong>
+            "这位 UP 主常吃什么？推荐率是多少？"
+          </div>
+        </div>
+        <div class="tool-card animate delay-4">
+          <div class="num">05</div>
+          <h3>生成美食打卡路线</h3>
+          <div class="fname">generate_food_tour_itinerary</div>
+          <p>按高德坐标编排路线；必点、避雷与原话只取自证据数据，LLM 新增的内容会被自动删除。</p>
+          <div class="example">
+            <strong>示例查询</strong>
+            "北京两天一夜、以老字号为主的路线"
+          </div>
+        </div>
+        <div class="tool-card animate delay-5">
+          <div class="num">06</div>
+          <h3>餐后反馈回写</h3>
+          <div class="fname">report_dining_outcome</div>
+          <p>Agent 在下一次对话里代收用户吃完的感受，挂在具体的那条 UP 主说法上；累计成每位 UP 主按菜系拆分的一致率。唯一会写入数据的工具。</p>
+          <div class="example">
+            <strong>示例对话</strong>
+            "上次那家的鱼确实嫩，但藿香烧米翘不值"
           </div>
         </div>
       </div>
@@ -761,43 +802,43 @@
         <div class="pipe-step">
           <div class="step-num">1</div>
           <h4>数据采集</h4>
-          <p>B站API + 视频列表采集 + CC字幕提取</p>
+          <p>B站API + 视频列表采集 + CC/AI 字幕提取</p>
         </div>
         <div class="pipe-step">
           <div class="step-num">2</div>
-          <h4>语音识别</h4>
-          <p>Whisper large-v3 ASR 转写无字幕视频</p>
+          <h4>LLM 抽取</h4>
+          <p>DeepSeek 结构化提取菜品评价 JSON；判定宁轻勿重</p>
         </div>
         <div class="pipe-step">
           <div class="step-num">3</div>
-          <h4>LLM 抽取</h4>
-          <p>GPT-4o / Qwen 结构化提取菜品评价 JSON</p>
+          <h4>原话核验</h4>
+          <p>原话回查字幕：视频时间点 + 跳转链接；对不上标为未核验</p>
         </div>
         <div class="pipe-step">
           <div class="step-num">4</div>
           <h4>存储检索</h4>
-          <p>Neo4j 图关系 + Milvus 向量语义检索</p>
+          <p>PG 评价与出处 + Milvus 原话向量 + Neo4j 关系</p>
         </div>
       </div>
 
       <div class="arch-box animate delay-2" style="margin-top:32px">
         ┌─────────────────── AI Agent 层 ───────────────────┐
-        │ Claude / ChatGPT / 自研Agent / 第三方开发者 │
+        │ Claude / Cursor / 自研Agent / 第三方开发者 │
         └───────────────────── MCP ─────────────────────────┘
         │
         ┌──────────────────────▼────────────────────────────┐
-        │ MCP Server (Python) │
-        │ search_dish │ get_review │ generate_itinerary │
+        │ MCP Server (Python) · 返回值都带出处 │
+        │ search_dish │ restaurant │ compare │ up_profile │ itinerary │
         └──────┬───────────────┬────────────────┬───────────┘
         │ │ │
         ┌────▼────┐ ┌──────▼──────┐ ┌─────▼──────┐
-        │ Neo4j │ │ Milvus/ │ │ PostgreSQL │
-        │ 图关系 │ │ Qdrant 向量 │ │ 元数据 │
+        │ Neo4j │ │ Milvus │ │ PostgreSQL │
+        │ 评价关系 │ │ 原话向量 │ │ 评价与出处 │
         └─────────┘ └─────────────┘ └────────────┘
         ▲ ▲ ▲
         ┌────┴───────────────┴────────────────┴──────────┐
         │ 数据处理 Pipeline (自动化) │
-        │ 采集 → ASR → LLM提取 → 清洗校验 → 入库 │
+        │ 采集 → 字幕 → LLM提取 → 原话核验 → 入库 │
         └────────────────────────────────────────────────┘</div>
     </div>
   </section>
@@ -816,45 +857,86 @@
         </div>
         <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center">
           <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">2</div>
-          <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">餐厅精准识别</div>
+          <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">餐厅入库</div>
         </div>
         <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center">
           <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">11</div>
           <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">菜品详细提取</div>
         </div>
         <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center">
-          <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">39/39</div>
+          <div style="font-size:2.5rem;font-weight:900;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent">76/76</div>
           <div style="color:var(--text2);font-size:0.9rem;margin-top:4px">单元测试通过</div>
         </div>
       </div>
 
       <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;overflow-x:auto">
-        <h4 style="font-size:1rem;margin-bottom:16px;color:var(--accent)">📋 LLM 提取示例 — 餐厅「8.4优雅河鲜」</h4>
+        <h4 style="font-size:1rem;margin-bottom:16px;color:var(--accent)">📋 真实运行产物节选 — 餐厅「8.4优雅河鲜」</h4>
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
           <thead>
             <tr style="color:var(--text2);text-align:left">
               <th style="padding:10px 12px;border-bottom:1px solid var(--border)">菜品</th>
-              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">评价</th>
-              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">口味</th>
-              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">口感</th>
-              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">UP主原话</th>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:10px 12px;font-weight:600">椒麻鲜笋</td>
-              <td style="padding:10px 12px"><span style="color:var(--accent2);font-weight:700">✓ 推荐</span></td>
-              <td style="padding:10px 12px;color:var(--text2)">椒麻味恰到好处</td>
-              <td style="padding:10px 12px;color:var(--text2)">清脆爽口</td>
-              <td style="padding:10px 12px;color:var(--text2);max-width:280px">"这道菜让我眼前一亮，椒麻味恰到好处，不麻嘴，笋子清脆爽口"</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 12px;font-weight:600">清蒸江团</td>
-              <td style="padding:10px 12px"><span style="color:var(--accent2);font-weight:700">✓ 推荐</span></td>
-              <td style="padding:10px 12px;color:var(--text2)">鲜美无比</td>
-              <td style="padding:10px 12px;color:var(--text2)">肉质细嫩</td>
-              <td style="padding:10px 12px;color:var(--text2);max-width:280px">"江团的肉质真是一绝，细嫩到入口即化…鱼肉本身的鲜美被完全保留"</td>
+              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">价格</th>
+              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">判定</th>
+              <th style="padding:10px 12px;border-bottom:1px solid var(--border)">UP主原话（节选）</th>
             </tr>
           </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:10px 12px;font-weight:600">一帆风顺（鱼）</td>
+              <td style="padding:10px 12px;color:var(--text2)">¥298/斤</td>
+              <td style="padding:10px 12px"><span style="color:var(--accent2);font-weight:700">推荐</span></td>
+              <td style="padding:10px 12px;color:var(--text2);max-width:420px">"这鱼肉真的好嫩……吃到最后还是有一点点土腥味，我能尝出来，你们不一定。"</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:10px 12px;font-weight:600">生态白胡子（豆豉做法）</td>
+              <td style="padding:10px 12px;color:var(--text2)">¥598/斤</td>
+              <td style="padding:10px 12px"><span style="color:var(--text2);font-weight:700">一般</span></td>
+              <td style="padding:10px 12px;color:var(--text2);max-width:420px">"鱼的品质还是不错的……但 598 的花拉丁，价格版的顶配奥拓，它也是奥拓呀。"</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 12px;font-weight:600">乡村藿香烧米翘</td>
+              <td style="padding:10px 12px;color:var(--text2)">¥198/位</td>
+              <td style="padding:10px 12px"><span style="color:var(--accent3);font-weight:700">踩雷</span></td>
+              <td style="padding:10px 12px;color:var(--text2);max-width:420px">"198 块钱，两块鱼肉一疙瘩面，而且你这个位置也没给我选好。"</td>
+            </tr>
+          </tbody>
         </table>
+        <p style="margin-top:16px;font-size:0.85rem;color:var(--text2)">这三条都不是 UP 主撒谎，难点在"话该怎么读"：专家才吃得出的瑕疵、取决于预算的好坏、混进菜品判断的店级因素。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRUST -->
+  <section id="trust">
+    <div class="container">
+      <div class="section-label">Trust by Design</div>
+      <div class="section-title">可信设计：凭什么可信</div>
+      <div class="section-desc">不假设 UP 主更诚实，而是让每个判断都可以被核对、被反驳、被计数。</div>
+      <div class="pain-grid">
+        <div class="pain-card animate">
+          <div class="icon">🔎</div>
+          <h3>原话可核对</h3>
+          <p>原话入库前回查字幕，对上的记录视频时间点与跳转链接，对不上的标为未核验。离线评测与线上核验用同一套规则。</p>
+        </div>
+        <div class="pain-card animate delay-1">
+          <div class="icon">📊</div>
+          <h3>不输出平均分</h3>
+          <p>每位 UP 主一票，标注孤证、共识、争议；对比优先看两家都去过的 UP 主，样本不足时不下结论。</p>
+        </div>
+        <div class="pain-card animate delay-2">
+          <div class="icon">⚖️</div>
+          <h3>负面结论举证更高</h3>
+          <p>避雷榜只收原话已核验的踩雷；判定宁轻勿重，不替一个有名有姓的人加重语气。</p>
+        </div>
+      </div>
+      <div class="biz-card animate delay-3" style="margin-top:20px">
+        <h3>🦆 对照美团鸭觅</h3>
+        <ul>
+          <li>鸭觅回答"该信谁"：筛选并问责推荐官，结论压缩成几把金勺子。</li>
+          <li>FoodMCP 回答"凭什么信"：不选人，把信任押在证据上，每条结论都能追到原视频的那一秒。</li>
+          <li>形态互换以后，两者断在同一个地方：数据层拿不到餐后反馈。所以 FoodMCP 加了回写工具 report_dining_outcome，让 Agent 代收餐后反馈；接下来缺的是真实使用。</li>
+          <li>机制对照与形态互换的思想实验见 PORTFOLIO 第七章。</li>
+        </ul>
       </div>
     </div>
   </section>
@@ -864,36 +946,47 @@
     <div class="container">
       <div class="section-label">Roadmap</div>
       <div class="section-title">实施路线图</div>
-      <div class="section-desc">分三个阶段渐进式推进，从 MVP 到生产级服务</div>
+      <div class="section-desc">先验证"视频能否变成结构化数据"，再回头追问"这些数据凭什么可信"</div>
       <div class="roadmap animate">
         <div class="rm-item" style="border-left: 3px solid var(--accent2);padding-left: 16px;border-radius: 0 8px 8px 0;">
           <h3>✅ Phase 1 · MVP 概念验证 — 已完成</h3>
           <div class="period">2026年4月 - 5月 ✓</div>
           <ul>
-            <li>✅ 突破B站412风控，成功采集视频数据</li>
+            <li>✅ 处理 B 站 412 拦截，完成视频列表与字幕采集</li>
             <li>✅ 部署 Docker 三库环境 (PG + Neo4j + Milvus)</li>
             <li>✅ LLM 信息抽取 Prompt 调优完成 (DeepSeek)</li>
             <li>✅ 端到端 Pipeline 验证: 特厨隋卞 → 2餐厅 + 11菜品 + 详细评价</li>
-            <li>✅ MCP Server 三 Tool 开发完成，单元测试 11/11</li>
+          </ul>
+        </div>
+        <div class="rm-item" style="border-left: 3px solid var(--accent2);padding-left: 16px;border-radius: 0 8px 8px 0;">
+          <h3>✅ Phase 1.5 · 数据治理与评测 — 已完成</h3>
+          <div class="period">2026年9月 ✓</div>
+          <ul>
+            <li>✅ 高德 POI 置信度门禁与降级标记</li>
+            <li>✅ 菜品与餐厅实体去重</li>
+            <li>✅ LLM 抽取评测框架（实体 F1、踩雷误判为推荐率、原话保真度）</li>
+            <li>✅ 任务状态机与断点续传；MCP 工具扩展到 5 个</li>
+          </ul>
+        </div>
+        <div class="rm-item" style="border-left: 3px solid var(--accent2);padding-left: 16px;border-radius: 0 8px 8px 0;">
+          <h3>✅ Phase 1.6 · 证据链 — 已完成</h3>
+          <div class="period">2026年10月 ✓</div>
+          <ul>
+            <li>✅ 原话回查字幕，记录视频时间点与跳转链接</li>
+            <li>✅ 所有 MCP 返回值附出处</li>
+            <li>✅ 按 UP 主计票替代平均分；负面结论要求原话已核验</li>
+            <li>✅ 行程规划只取证据数据，越界内容自动删除</li>
+            <li>✅ 餐后反馈回写工具；可信度报告（可核对率、北极星、UP 主一致率）</li>
           </ul>
         </div>
         <div class="rm-item">
-          <h3>Phase 2 · MCP 服务构建</h3>
-          <div class="period">第 2-3 个月</div>
+          <h3>Phase 2 · 可信度</h3>
+          <div class="period">计划中</div>
           <ul>
-            <li>部署 Neo4j + 向量数据库</li>
-            <li>实现三个核心 MCP Tools</li>
-            <li>在 Claude Desktop 中端到端测试</li>
-            <li>编写 API 文档和使用指南</li>
-          </ul>
-        </div>
-        <div class="rm-item">
-          <h3>Phase 3 · 扩大规模与部署</h3>
-          <div class="period">第 4-6 个月</div>
-          <ul>
-            <li>引入自动化定时任务（Airflow），追踪UP主更新</li>
-            <li>扩展至 5+ 城市、20+ UP主</li>
-            <li>正式发布，探索商业化合作</li>
+            <li>用真实字幕建立难例评测集，写定判定口径</li>
+            <li>积累真实餐后反馈，反向校准 UP 主在各菜系上的权重</li>
+            <li>识别合作声明；菜系归一化；城市按餐厅推断</li>
+            <li>与少量 UP 主达成授权</li>
           </ul>
         </div>
       </div>
@@ -905,24 +998,22 @@
     <div class="container">
       <div class="section-label">Business Model</div>
       <div class="section-title">商业模式</div>
-      <div class="section-desc">面向个人用户与企业的双轮驱动变现路径</div>
+      <div class="section-desc">变现不能以牺牲中立为代价：不向餐饮商家收费，内容授权先于分发</div>
       <div class="biz-grid animate">
         <div class="biz-card">
           <h3>👤 To C · 个人用户</h3>
           <ul>
-            <li>ChatGPT / Claude 第三方 MCP 工具插件</li>
-            <li>独立美食问答 Agent 小程序</li>
-            <li>高级打卡路线规划订阅制</li>
-            <li>广告变现</li>
+            <li>Claude / Cursor 等 Agent 中的 MCP 工具</li>
+            <li>每条推荐都能回看出处</li>
+            <li>基于用户自己餐后反馈的口味匹配（规划中）</li>
           </ul>
         </div>
         <div class="biz-card">
-          <h3>🏢 To B · 企业服务</h3>
+          <h3>🏢 To B · Agent 开发者</h3>
           <ul>
-            <li>视频评价摘要 API 授权（大众点评/高德）</li>
-            <li>餐饮商家 UP主舆情监控报告</li>
-            <li>连锁品牌竞品分析定制服务</li>
-            <li>数据按调用量 / SaaS 订阅计费</li>
+            <li>面向 Agent 的证据服务，按调用计费</li>
+            <li>与 UP 主授权合作：引用回流到原视频时间点</li>
+            <li>不向餐饮商家收费：商家付费会让推荐失去中立</li>
           </ul>
         </div>
       </div>
